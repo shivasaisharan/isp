@@ -1,0 +1,246 @@
+from typing import List, Optional, Any, Dict
+from datetime import datetime
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+
+# --- Auth & User Schemas ---
+class UserBase(BaseModel):
+    email: EmailStr
+    full_name: str
+    phone: Optional[str] = None
+    role: str
+
+class UserCreateCandidate(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+    full_name: str
+    phone: Optional[str] = None
+
+class UserCreateHR(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+    full_name: str
+    organization_name: str
+    phone: Optional[str] = None
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: Dict[str, Any]
+
+class UserOut(UserBase):
+    id: str
+    is_active: bool
+    avatar_url: Optional[str] = None
+    created_at: datetime
+    organization: Optional[Dict[str, Any]] = None
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Profile Schemas ---
+class CandidateProfileUpdate(BaseModel):
+    headline: Optional[str] = None
+    summary: Optional[str] = None
+    education: Optional[str] = None
+    experience_years: Optional[float] = None
+    skills: Optional[List[str]] = None
+    location: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
+
+class CandidateProfileOut(BaseModel):
+    id: str
+    user_id: str
+    headline: Optional[str] = None
+    summary: Optional[str] = None
+    education: Optional[str] = None
+    experience_years: float = 0.0
+    skills: List[str] = []
+    location: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
+    anonymized_alias: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Job Schemas ---
+class JobBase(BaseModel):
+    title: str
+    department: str
+    experience_level: str = "Mid-Level"
+    location: str = "Remote / Hybrid"
+    employment_type: str = "Full-Time"
+    salary_range: Optional[str] = "$90,000 - $130,000"
+    required_skills: List[str] = []
+    preferred_skills: List[str] = []
+    description: str
+
+class JobCreate(JobBase):
+    status: str = "published"
+
+class JobUpdate(BaseModel):
+    title: Optional[str] = None
+    department: Optional[str] = None
+    experience_level: Optional[str] = None
+    location: Optional[str] = None
+    employment_type: Optional[str] = None
+    salary_range: Optional[str] = None
+    required_skills: Optional[List[str]] = None
+    preferred_skills: Optional[List[str]] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+class JobOut(JobBase):
+    id: str
+    organization_id: str
+    organization_name: Optional[str] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    applicants_count: Optional[int] = 0
+    model_config = ConfigDict(from_attributes=True)
+
+class JobSummary(BaseModel):
+    id: str
+    title: str
+    department: Optional[str] = None
+    location: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Application Schemas ---
+class ApplicationCreate(BaseModel):
+    job_id: str
+    resume_file_id: Optional[str] = None
+
+class ApplicationStatusUpdate(BaseModel):
+    status: str
+    note: Optional[str] = None
+
+class ApplicationOut(BaseModel):
+    id: str
+    job_id: str
+    candidate_id: str
+    resume_file_id: Optional[str] = None
+    status: str
+    resume_match_score: float
+    sbert_similarity: float
+    skills_match_score: float
+    overall_ranking_score: float
+    applied_at: datetime
+    updated_at: datetime
+    job: Optional[JobSummary] = None
+    candidate_name: Optional[str] = None
+    candidate_email: Optional[str] = None
+    anonymized_alias: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Interview Schemas ---
+class InterviewStartRequest(BaseModel):
+    application_id: str
+    duration_minutes: Optional[int] = 15
+
+class InterviewAnswerSubmit(BaseModel):
+    session_id: str
+    question_id: str
+    answer: str
+
+class InterviewQuestionOut(BaseModel):
+    id: str
+    question_index: int
+    question_text: str
+    category: str
+    model_config = ConfigDict(from_attributes=True)
+
+class InterviewSessionOut(BaseModel):
+    id: str
+    application_id: str
+    candidate_id: str
+    job_id: str
+    status: str
+    duration_minutes: int
+    current_question_index: int
+    total_questions: int
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    current_question: Optional[InterviewQuestionOut] = None
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Report Schemas ---
+class InterviewReportOut(BaseModel):
+    id: str
+    session_id: str
+    application_id: str
+    technical_rating: float
+    problem_solving_rating: float
+    skills_rating: float
+    communication_rating: float
+    project_rating: float
+    overall_score: float
+    rubric_version: str
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+    skill_gap_summary: str
+    suggestions_for_improvement: str
+    transparency_breakdown: Dict[str, Any] = {}
+    candidate_visible_feedback: str
+    recruiter_confidential_notes: Optional[str] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Ranking & Recommendation Schemas ---
+class TopCandidateRecommendation(BaseModel):
+    rank: int
+    application_id: str
+    candidate_id: str
+    candidate_name: str
+    anonymized_alias: str
+    resume_match_score: float
+    interview_score: float
+    required_skills_score: float
+    overall_score: float
+    status: str
+    matched_skills: List[str] = []
+    missing_skills: List[str] = []
+    strengths: List[str] = []
+    areas_for_review: List[str] = []
+    assessment_limitations: str
+    has_interview_report: bool
+    report_id: Optional[str] = None
+
+# --- Hiring Decision Schemas ---
+class HiringDecisionCreate(BaseModel):
+    application_id: str
+    decision: str = Field(..., pattern="^(selected|rejected|on_hold)$")
+    rationale: str = Field(..., min_length=5)
+
+class HiringDecisionOut(BaseModel):
+    id: str
+    application_id: str
+    job_id: str
+    recruiter_id: Optional[str] = None
+    decision: str
+    rationale: str
+    decided_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# --- Activity & Notification Schemas ---
+class UserActivityEventOut(BaseModel):
+    id: str
+    event_type: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    description: str
+    metadata_json: Dict[str, Any] = {}
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+class NotificationOut(BaseModel):
+    id: str
+    title: str
+    message: str
+    notification_type: str
+    is_read: bool
+    link: Optional[str] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)

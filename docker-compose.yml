@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # Production Database (PostgreSQL)
+  db:
+    image: postgres:16-alpine
+    container_name: smart_recruit_db
+    restart: always
+    environment:
+      POSTGRES_USER: smart_recruit
+      POSTGRES_PASSWORD: secure_password_2026
+      POSTGRES_DB: smart_recruit_prod
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # FastAPI Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smart_recruit_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://smart_recruit:secure_password_2026@db:5432/smart_recruit_prod
+      SECRET_KEY: smart-recruit-production-jwt-secret-key-2026
+      GEMINI_API_KEY: ""
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    volumes:
+      - ./backend/uploads:/app/uploads
+
+  # React Frontend Client
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: smart_recruit_frontend
+    restart: always
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+
