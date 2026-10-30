@@ -163,13 +163,13 @@ def evaluate_single_answer(question_text: str, candidate_answer: str, category: 
 
     # 6. Genuine evidence-based score computation (0 - 100)
     # Grounded on actual technical hits, architecture principles, and semantic alignment
-    relevance_multiplier = min(1.0, max(0.2, semantic_relevance * 5.0))
+    relevance_multiplier = 1.0 if (tech_hits >= 2 or arch_hits >= 2) else min(1.0, max(0.3, semantic_relevance * 5.0))
     
-    base_tech = min(95.0, (tech_hits * 20.0) + (min(arch_hits, 4) * 10.0) + (semantic_relevance * 40.0) + (min(word_count, 120) / 10.0)) * relevance_multiplier
-    base_problem = min(95.0, (min(arch_hits, 5) * 12.0) + (min(star_hits, 4) * 10.0) + (semantic_relevance * 30.0) + (min(word_count, 120) / 10.0)) * relevance_multiplier
-    base_skills = min(95.0, (tech_hits * 25.0) + (min(arch_hits, 3) * 10.0) + (semantic_relevance * 30.0)) * relevance_multiplier
+    base_tech = min(95.0, (tech_hits * 22.0) + (min(arch_hits, 4) * 10.0) + (semantic_relevance * 30.0) + (min(word_count, 120) / 8.0)) * relevance_multiplier
+    base_problem = min(95.0, (min(arch_hits, 5) * 14.0) + (min(star_hits, 4) * 10.0) + (semantic_relevance * 25.0) + (min(word_count, 120) / 8.0)) * relevance_multiplier
+    base_skills = min(95.0, (tech_hits * 26.0) + (min(arch_hits, 3) * 10.0) + (semantic_relevance * 25.0)) * relevance_multiplier
     base_comm = min(95.0, (lexical_diversity * 50.0) + (min(star_hits, 4) * 8.0) + (min(word_count, 100) / 8.0))
-    base_proj = min(95.0, (min(arch_hits, 4) * 12.0) + (min(star_hits, 4) * 10.0) + (semantic_relevance * 30.0)) * relevance_multiplier
+    base_proj = min(95.0, (min(arch_hits, 4) * 12.0) + (min(star_hits, 4) * 10.0) + (semantic_relevance * 25.0)) * relevance_multiplier
 
     scores = {
         "technical_correctness": round(max(0.0, base_tech), 1),

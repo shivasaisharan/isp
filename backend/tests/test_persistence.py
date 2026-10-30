@@ -42,6 +42,15 @@ def test_candidate_resume_deletion(client):
     token = login.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
+    # Upload a test resume to ensure at least one resume exists
+    pdf_content = b"%PDF-1.4 test sample content Python FastAPI Docker"
+    upload_res = client.post(
+        "/api/v1/candidate/resumes/upload",
+        files={"file": ("test_resume.pdf", pdf_content, "application/pdf")},
+        headers=headers
+    )
+    assert upload_res.status_code == 201
+
     # Fetch candidate resumes
     resumes_res = client.get("/api/v1/candidate/resumes", headers=headers)
     assert resumes_res.status_code == 200
