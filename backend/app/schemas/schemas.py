@@ -161,9 +161,41 @@ class InterviewSessionOut(BaseModel):
     duration_minutes: int
     current_question_index: int
     total_questions: int
+    violation_count: int = 0
+    max_violations: int = 3
+    flagged_for_review: bool = False
+    termination_reason: Optional[str] = None
+    is_secure_mode: bool = True
     started_at: datetime
     completed_at: Optional[datetime] = None
     current_question: Optional[InterviewQuestionOut] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class InterviewViolationCreate(BaseModel):
+    violation_type: str
+    description: str
+    metadata: Optional[dict] = None
+
+class InterviewViolationOut(BaseModel):
+    id: str
+    interview_session_id: str
+    violation_type: str
+    description: str
+    violation_number: int
+    occurred_at: datetime
+    metadata_json: Optional[dict] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class InterviewSecurityStatus(BaseModel):
+    session_id: str
+    status: str
+    violation_count: int
+    max_violations: int = 3
+    remaining_chances: int
+    flagged_for_review: bool
+    is_terminated: bool
+    termination_reason: Optional[str] = None
+    violations: List[InterviewViolationOut] = []
     model_config = ConfigDict(from_attributes=True)
 
 # --- Report Schemas ---

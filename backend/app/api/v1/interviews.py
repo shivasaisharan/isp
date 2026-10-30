@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_candidate
 from app.models.models import (
     InterviewSession, InterviewQuestion, InterviewAnswer, InterviewReport,
-    Application, ApplicationStatusHistory, Job, User
+    InterviewViolation, Application, ApplicationStatusHistory, Job, User
 )
 from app.schemas.schemas import (
-    InterviewStartRequest, InterviewSessionOut, InterviewAnswerSubmit, InterviewQuestionOut
+    InterviewStartRequest, InterviewSessionOut, InterviewAnswerSubmit, InterviewQuestionOut,
+    InterviewViolationCreate, InterviewViolationOut, InterviewSecurityStatus
 )
 from app.services.ai_service import (
     generate_interview_questions, evaluate_single_answer, generate_final_interview_report
@@ -210,8 +211,11 @@ def submit_interview_answer(
     ).first()
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    if session.status == "completed":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Interview session already completed")
+    if session.status in ["completed", "terminated_flagged"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Interview session is no longer active or has been terminated for security review."
+        )
 
     question = db.query(InterviewQuestion).filter(
         InterviewQuestion.id == answer_in.question_id,
@@ -408,4 +412,209 @@ async def transcribe_interview_audio(
 
     text = transcribe_audio_bytes(audio_bytes, file_suffix=suffix)
     return {"transcript": text}
+
+# =========================================================================
+# SECURE FULL-SCREEN INTERVIEW MONITORING & THREE-STRIKE VIOLATION APIS
+# =========================================================================
+
+@router.get("/{session_id}/security-status", response_model=InterviewSecurityStatus)
+def get_interview_security_status(
+    session_id: str,
+    candidate: User = Depends(require_candidate),
+    db: Session = Depends(get_db)
+):
+    """Retrieves current live security monitoring state, violation counts, and flags."""
+    session = db.query(InterviewSession).filter(
+        InterviewSession.id == session_id,
+        InterviewSession.candidate_id == candidate.id
+    ).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview session not found")
+
+    violations = db.query(InterviewViolation).filter(
+        InterviewViolation.interview_session_id == session.id
+    ).order_by(InterviewViolation.occurred_at.asc()).all()
+
+    return InterviewSecurityStatus(
+        session_id=session.id,
+        status=session.status,
+        violation_count=session.violation_count,
+        max_violations=session.max_violations,
+        remaining_chances=max(0, session.max_violations - session.violation_count),
+        flagged_for_review=session.flagged_for_review,
+        is_terminated=(session.status == "terminated_flagged"),
+        termination_reason=session.termination_reason,
+        violations=violations
+    )
+
+@router.post("/{session_id}/violations")
+def record_interview_violation(
+    session_id: str,
+    violation_in: InterviewViolationCreate,
+    candidate: User = Depends(require_candidate),
+    db: Session = Depends(get_db)
+):
+    """
+    Records a detected security environment interruption (full-screen exit, tab switch, focus lost).
+    Enforces atomic three-strike policy:
+    - Violations 1 & 2: Increments counter and issues warnings.
+    - Violation 3: Automatically terminates interview and flags for HR Review.
+    Includes backend 2.5s deduplication protection.
+    """
+    session = db.query(InterviewSession).filter(
+        InterviewSession.id == session_id,
+        InterviewSession.candidate_id == candidate.id
+    ).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview session not found")
+
+    if session.status in ["completed", "terminated_flagged"]:
+        return {
+            "status": session.status,
+            "violation_count": session.violation_count,
+            "is_terminated": True,
+            "message": "Interview session already concluded or flagged."
+        }
+
+    # Deduplication guard: ignore repeat signals within 2.5 seconds
+    recent_violation = db.query(InterviewViolation).filter(
+        InterviewViolation.interview_session_id == session.id
+    ).order_by(InterviewViolation.occurred_at.desc()).first()
+
+    now = datetime.now(timezone.utc)
+    if recent_violation:
+        delta = (now - recent_violation.occurred_at.replace(tzinfo=timezone.utc)).total_seconds()
+        if delta < 2.5:
+            # Clustered browser event (e.g., blur + visibilitychange triggered in tandem)
+            return {
+                "status": session.status,
+                "violation_count": session.violation_count,
+                "remaining_chances": max(0, session.max_violations - session.violation_count),
+                "is_terminated": False,
+                "deduplicated": True,
+                "message": "Interruption signal clustered with recent event; deduplicated."
+            }
+
+    # Increment violation count
+    session.violation_count += 1
+    new_violation_num = session.violation_count
+
+    violation_record = InterviewViolation(
+        interview_session_id=session.id,
+        candidate_id=candidate.id,
+        violation_type=violation_in.violation_type,
+        description=violation_in.description,
+        violation_number=new_violation_num,
+        metadata_json=violation_in.metadata or {},
+        occurred_at=now
+    )
+    db.add(violation_record)
+
+    record_user_activity(
+        db=db,
+        user_id=candidate.id,
+        event_type="interview_security_violation",
+        resource_type="interview_session",
+        resource_id=session.id,
+        description=f"Security alert {new_violation_num}/3: {violation_in.description}",
+        metadata_json={"violation_type": violation_in.violation_type, "violation_number": new_violation_num}
+    )
+
+    is_terminated = False
+    if session.violation_count >= session.max_violations:
+        # Third strike: Terminate and flag for HR Review
+        session.status = "terminated_flagged"
+        session.flagged_for_review = True
+        session.termination_reason = "Exceeded maximum permitted environment interruptions (3/3 strikes). Interview flagged for human HR evaluation."
+        session.completed_at = now
+        is_terminated = True
+
+        app = session.application
+        if app:
+            app.status = "hr_review"
+            hist = ApplicationStatusHistory(
+                application_id=app.id,
+                previous_status=app.status,
+                new_status="hr_review",
+                changed_by_id=candidate.id,
+                note="AI interview terminated due to 3 security violations. Flagged for HR review."
+            )
+            db.add(hist)
+
+            create_notification(
+                db=db,
+                user_id=candidate.id,
+                title="Interview Flagged for HR Review",
+                message="Your interview session concluded after 3 environment interruptions. An authorized recruiter will review the session recording and security logs.",
+                notification_type="interview",
+                link=f"/candidate/applications/{app.id}"
+            )
+
+    db.commit()
+    db.refresh(session)
+
+    return {
+        "status": session.status,
+        "violation_count": session.violation_count,
+        "remaining_chances": max(0, session.max_violations - session.violation_count),
+        "is_terminated": is_terminated,
+        "flagged_for_review": session.flagged_for_review,
+        "message": "Violation recorded." if not is_terminated else "Session terminated and flagged for HR review."
+    }
+
+@router.post("/{session_id}/resume-secure-mode")
+def resume_secure_mode(
+    session_id: str,
+    candidate: User = Depends(require_candidate),
+    db: Session = Depends(get_db)
+):
+    """Confirms candidate has re-entered full-screen and resumed compliance."""
+    session = db.query(InterviewSession).filter(
+        InterviewSession.id == session_id,
+        InterviewSession.candidate_id == candidate.id
+    ).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    if session.status == "terminated_flagged":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot resume terminated interview.")
+
+    session.is_secure_mode = True
+    db.commit()
+    return {"message": "Secure mode re-engaged", "status": session.status}
+
+@router.get("/hr/{session_id}/security-report")
+def get_hr_security_report(
+    session_id: str,
+    db: Session = Depends(get_db)
+):
+    """Returns official security audit report for HR review."""
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview session not found")
+
+    violations = db.query(InterviewViolation).filter(
+        InterviewViolation.interview_session_id == session.id
+    ).order_by(InterviewViolation.occurred_at.asc()).all()
+
+    return {
+        "session_id": session.id,
+        "status": session.status,
+        "flagged_for_review": session.flagged_for_review,
+        "violation_count": session.violation_count,
+        "max_violations": session.max_violations,
+        "termination_reason": session.termination_reason,
+        "started_at": session.started_at,
+        "completed_at": session.completed_at,
+        "violations": [
+            {
+                "id": v.id,
+                "violation_number": v.violation_number,
+                "violation_type": v.violation_type,
+                "description": v.description,
+                "occurred_at": v.occurred_at,
+                "metadata": v.metadata_json
+            }
+            for v in violations
+        ]
+    }
 

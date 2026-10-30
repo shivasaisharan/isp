@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer
 } from 'recharts';
-import { Award, ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, Lock } from 'lucide-react';
+import { Award, ArrowLeft, ShieldAlert, ShieldCheck, CheckCircle2, AlertTriangle, Lock, Clock, AlertOctagon } from 'lucide-react';
 import api from '../../services/api';
 
 export default function HrCandidateReport() {
@@ -78,6 +78,95 @@ export default function HrCandidateReport() {
             <span>Confidential Recruiter Assessment Notes</span>
           </div>
           <p className="leading-relaxed text-amber-100">{report.recruiter_confidential_notes}</p>
+        </div>
+      )}
+
+      {/* Proctoring & Security Audit */}
+      {report.security_audit && (
+        <div className={`p-6 rounded-2xl border text-xs space-y-4 ${
+          report.security_audit.flagged_for_review
+            ? 'bg-red-950/30 border-red-800/60'
+            : report.security_audit.violation_count > 0
+            ? 'bg-amber-950/30 border-amber-800/60'
+            : 'bg-emerald-950/30 border-emerald-800/60'
+        }`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/60 pb-3">
+            <div className="flex items-center gap-2.5">
+              {report.security_audit.flagged_for_review ? (
+                <div className="p-2 rounded-xl bg-red-500/20 text-red-400">
+                  <AlertOctagon className="w-5 h-5" />
+                </div>
+              ) : report.security_audit.violation_count > 0 ? (
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+              ) : (
+                <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+              )}
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  Secure Full-Screen Proctoring Audit
+                  {report.security_audit.flagged_for_review && (
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-red-500/30 text-red-300 border border-red-500/40">
+                      Flagged for HR Review
+                    </span>
+                  )}
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Three-Strike Policy Enforcement: System terminates and flags for recruiter inspection without automatic rejection.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400 font-semibold">Total Violations:</span>
+              <span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${
+                report.security_audit.violation_count >= 3
+                  ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                  : report.security_audit.violation_count > 0
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+              }`}>
+                {report.security_audit.violation_count} / {report.security_audit.max_violations || 3} Strikes
+              </span>
+            </div>
+          </div>
+
+          {report.security_audit.termination_reason && (
+            <div className="p-3 rounded-xl bg-red-900/30 border border-red-800/40 text-red-200 text-xs">
+              <strong>Termination Reason:</strong> {report.security_audit.termination_reason}
+            </div>
+          )}
+
+          {report.security_audit.violations && report.security_audit.violations.length > 0 ? (
+            <div className="space-y-2 pt-1">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Chronological Violation Timeline</h4>
+              <div className="space-y-2">
+                {report.security_audit.violations.map((v, i) => (
+                  <div key={i} className="flex items-start justify-between p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-red-400">Strike #{v.violation_number}</span>
+                        <span className="text-slate-400 font-medium">({v.violation_type.replace('_', ' ')})</span>
+                      </div>
+                      <p className="text-slate-300 text-[11px]">{v.description}</p>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono shrink-0 ml-4">
+                      <Clock className="w-3 h-3" />
+                      <span>{new Date(v.occurred_at).toLocaleTimeString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-slate-400 text-xs flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              Candidate maintained full-screen compliance throughout the entire assessment.
+            </p>
+          )}
         </div>
       )}
 

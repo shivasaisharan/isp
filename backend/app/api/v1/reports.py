@@ -55,8 +55,21 @@ def get_report_by_id(
         if not membership or app.job.organization_id != membership.organization_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: report belongs to another organization")
         
-        # Return complete HR scorecard including confidential notes
+        # Return complete HR scorecard including confidential notes and proctoring security audit
         cand = app.candidate
+        session = report.session
+        violations_data = [
+            {
+                "id": v.id,
+                "violation_type": v.violation_type,
+                "violation_number": v.violation_number,
+                "description": v.description,
+                "metadata_json": v.metadata_json,
+                "occurred_at": v.occurred_at
+            }
+            for v in session.violations
+        ] if session and session.violations else []
+
         return {
             "id": report.id,
             "session_id": report.session_id,
@@ -79,7 +92,15 @@ def get_report_by_id(
             "transparency_breakdown": report.transparency_breakdown,
             "candidate_visible_feedback": report.candidate_visible_feedback,
             "recruiter_confidential_notes": report.recruiter_confidential_notes,
-            "created_at": report.created_at
+            "created_at": report.created_at,
+            "security_audit": {
+                "violation_count": session.violation_count if session else 0,
+                "max_violations": session.max_violations if session else 3,
+                "flagged_for_review": session.flagged_for_review if session else False,
+                "termination_reason": session.termination_reason if session else None,
+                "status": session.status if session else "completed",
+                "violations": violations_data
+            }
         }
 
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized role")

@@ -198,11 +198,18 @@ class InterviewSession(Base):
     candidate_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     job_id = Column(String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    status = Column(String(30), default="in_progress", nullable=False)  # pending, in_progress, completed, expired
+    status = Column(String(30), default="in_progress", nullable=False)  # pending, in_progress, completed, expired, terminated_flagged
     duration_minutes = Column(Integer, default=15, nullable=False)
     current_question_index = Column(Integer, default=0, nullable=False)
     total_questions = Column(Integer, default=5, nullable=False)
     
+    # Secure Full-Screen Monitoring Fields
+    violation_count = Column(Integer, default=0, nullable=False)
+    max_violations = Column(Integer, default=3, nullable=False)
+    flagged_for_review = Column(Boolean, default=False, nullable=False)
+    termination_reason = Column(Text, nullable=True)
+    is_secure_mode = Column(Boolean, default=True, nullable=False)
+
     started_at = Column(DateTime, default=utc_now, nullable=False)
     completed_at = Column(DateTime, nullable=True)
 
@@ -211,6 +218,22 @@ class InterviewSession(Base):
     questions = relationship("InterviewQuestion", back_populates="session", cascade="all, delete-orphan", order_by="InterviewQuestion.question_index")
     answers = relationship("InterviewAnswer", back_populates="session", cascade="all, delete-orphan")
     report = relationship("InterviewReport", back_populates="session", uselist=False, cascade="all, delete-orphan")
+    violations = relationship("InterviewViolation", back_populates="session", cascade="all, delete-orphan", order_by="InterviewViolation.occurred_at")
+
+
+class InterviewViolation(Base):
+    __tablename__ = "interview_violations"
+    
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    interview_session_id = Column(String(36), ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    candidate_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    violation_type = Column(String(50), nullable=False)  # fullscreen_exit, tab_switched, focus_lost, navigation_attempt
+    description = Column(Text, nullable=False)
+    violation_number = Column(Integer, nullable=False)
+    metadata_json = Column(JSON, default=dict, nullable=False)
+    occurred_at = Column(DateTime, default=utc_now, nullable=False)
+
+    session = relationship("InterviewSession", back_populates="violations")
 
 
 class InterviewQuestion(Base):

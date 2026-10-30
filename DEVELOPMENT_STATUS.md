@@ -50,6 +50,7 @@
 | **Phase 6** | **Strict NLP Scoring** | Type-Token Ratio, Cosine similarity, Anti-gibberish filter | **COMPLETED** |
 | **Phase 7** | **HR Intelligence** | Top-5 ranking board, Candidate compare, Human decision | **COMPLETED** |
 | **Phase 8** | **Analytics & Admin** | Radar competency charts, Audit trails, System telemetry | **COMPLETED** |
+| **Phase 9** | **Secure Full-Screen Proctoring** | Full-screen enforcement, 3-strike violation policy, HR security audit report | **COMPLETED** |
 
 ---
 
@@ -78,3 +79,4 @@ All 10 backend integration and security test suites are passing (`10 passed in 8
 | **HR Recruiter Portal** | `5173` | **[http://localhost:5173/hr/login](http://localhost:5173/hr/login)** |
 | **Backend REST API** | `8000` | **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)** |
 | **GitHub Repository** | Git | **[https://github.com/shivasaisharan/isp.git](https://github.com/shivasaisharan/isp.git)** |
+
