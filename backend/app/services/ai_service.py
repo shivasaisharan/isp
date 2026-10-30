@@ -87,60 +87,108 @@ Return ONLY valid JSON.
 
 def evaluate_single_answer(question_text: str, candidate_answer: str, category: str, required_skills: List[str]) -> Dict:
     """
-    Evaluates turn-by-turn answer evidence against the documented rubric.
-    Never clamps arbitrarily to high minimum scores.
+    Evaluates turn-by-turn answer evidence using multi-metric NLP semantic verification.
+    Guards against gibberish, filler repetition, and non-responsive answers:
+    - Cosine TF-IDF semantic relevance check against the question & target domain.
+    - Repetition / lexical diversity analysis (TTR - Type-Token Ratio).
+    - Hard penalty (0% - 15%) for non-responsive, evasive, or repetitive answers.
     """
     answer_text = candidate_answer.strip()
     words = answer_text.split()
     word_count = len(words)
     
-    if word_count < 5:
-        # Barely answered
+    # 1. Length guard
+    if word_count < 6:
         return {
-            "technical_score": 20.0,
-            "problem_solving_score": 20.0,
-            "skills_score": 20.0,
-            "communication_score": 25.0,
-            "project_score": 20.0,
-            "composite_score": 21.0,
-            "feedback": "Answer was too brief to provide verifiable engineering evidence. Please elaborate with specific technical details."
+            "technical_score": 0.0,
+            "problem_solving_score": 0.0,
+            "skills_score": 0.0,
+            "communication_score": 10.0,
+            "project_score": 0.0,
+            "composite_score": 1.0,
+            "feedback": "Answer was too brief to evaluate. No technical or problem-solving evidence provided."
         }
 
-    # Keyword and technical depth indicators
+    # 2. Lexical diversity check (catches 'hello hello hello ii my my my')
+    unique_words = set(w.lower() for w in words)
+    lexical_diversity = len(unique_words) / max(word_count, 1)
+
+    # 3. NLP Semantic Relevance: Question-Answer Cosine Similarity
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+        vec = TfidfVectorizer(stop_words='english')
+        # Combine question with domain skills
+        context_text = f"{question_text} {' '.join(required_skills)}"
+        tfidf_mat = vec.fit_transform([context_text, answer_text])
+        semantic_relevance = float(cosine_similarity(tfidf_mat[0:1], tfidf_mat[1:2])[0][0])
+    except Exception:
+        semantic_relevance = 0.1
+
+    # 4. Keyword & Competency Spotting
     ans_lower = answer_text.lower()
     tech_hits = sum(1 for sk in required_skills if sk.lower() in ans_lower)
     
-    architecture_terms = ["scalable", "latency", "throughput", "cache", "redis", "database", "index", "async", "concurrency", "test", "docker", "pipeline", "trade-off"]
+    architecture_terms = [
+        "scalable", "latency", "throughput", "cache", "redis", "database", "index", 
+        "async", "concurrency", "test", "docker", "pipeline", "trade-off", "microservice",
+        "kubernetes", "sql", "api", "rest", "schema", "query", "optimization"
+    ]
     arch_hits = sum(1 for term in architecture_terms if term in ans_lower)
 
-    star_terms = ["situation", "task", "action", "result", "because", "impact", "resolved", "improved", "optimized", "collaborated"]
+    star_terms = [
+        "situation", "task", "action", "result", "because", "impact", "resolved",
+        "improved", "optimized", "collaborated", "engineered", "implemented", "designed"
+    ]
     star_hits = sum(1 for term in star_terms if term in ans_lower)
 
-    # Genuine evidence-based score computation (0 - 100)
-    base_tech = min(95.0, 45.0 + (tech_hits * 12.0) + (min(arch_hits, 4) * 6.0) + (min(word_count, 150) / 10.0))
-    base_problem = min(95.0, 42.0 + (min(arch_hits, 5) * 8.0) + (min(star_hits, 4) * 6.0) + (min(word_count, 120) / 12.0))
-    base_skills = min(95.0, 40.0 + (tech_hits * 18.0) + (min(word_count, 100) / 10.0))
-    base_comm = min(95.0, 50.0 + (min(star_hits, 5) * 6.0) + (min(word_count, 120) / 8.0))
-    base_proj = min(95.0, 45.0 + (min(arch_hits, 4) * 8.0) + (min(star_hits, 4) * 6.0) + (min(word_count, 100) / 10.0))
+    # 5. Gibberish / Repetition / Evasion Detection Rule
+    is_gibberish_or_evasion = (
+        (lexical_diversity < 0.45 and word_count > 10) or
+        (semantic_relevance < 0.02 and tech_hits == 0 and arch_hits == 0) or
+        ("don't know" in ans_lower and word_count < 20) or
+        ("dont know" in ans_lower and word_count < 20)
+    )
+
+    if is_gibberish_or_evasion:
+        return {
+            "technical_score": 0.0,
+            "problem_solving_score": 0.0,
+            "skills_score": 0.0,
+            "communication_score": 5.0,
+            "project_score": 0.0,
+            "composite_score": 0.5,
+            "feedback": "Answer failed relevance check. Repeated filler words or evasive phrases do not demonstrate engineering competence."
+        }
+
+    # 6. Genuine evidence-based score computation (0 - 100)
+    # Grounded on actual technical hits, architecture principles, and semantic alignment
+    relevance_multiplier = min(1.0, max(0.2, semantic_relevance * 5.0))
+    
+    base_tech = min(95.0, (tech_hits * 20.0) + (min(arch_hits, 4) * 10.0) + (semantic_relevance * 40.0) + (min(word_count, 120) / 10.0)) * relevance_multiplier
+    base_problem = min(95.0, (min(arch_hits, 5) * 12.0) + (min(star_hits, 4) * 10.0) + (semantic_relevance * 30.0) + (min(word_count, 120) / 10.0)) * relevance_multiplier
+    base_skills = min(95.0, (tech_hits * 25.0) + (min(arch_hits, 3) * 10.0) + (semantic_relevance * 30.0)) * relevance_multiplier
+    base_comm = min(95.0, (lexical_diversity * 50.0) + (min(star_hits, 4) * 8.0) + (min(word_count, 100) / 8.0))
+    base_proj = min(95.0, (min(arch_hits, 4) * 12.0) + (min(star_hits, 4) * 10.0) + (semantic_relevance * 30.0)) * relevance_multiplier
 
     scores = {
-        "technical_correctness": round(base_tech, 1),
-        "problem_solving": round(base_problem, 1),
-        "job_skills_application": round(base_skills, 1),
-        "communication_clarity": round(base_comm, 1),
-        "project_experience_depth": round(base_proj, 1)
+        "technical_correctness": round(max(0.0, base_tech), 1),
+        "problem_solving": round(max(0.0, base_problem), 1),
+        "job_skills_application": round(max(0.0, base_skills), 1),
+        "communication_clarity": round(max(0.0, base_comm), 1),
+        "project_experience_depth": round(max(0.0, base_proj), 1)
     }
     composite = calculate_interview_composite_score(scores)
 
     feedback_points = []
     if tech_hits > 0:
-        feedback_points.append(f"Successfully highlighted relevant stack competencies.")
+        feedback_points.append("Successfully highlighted relevant stack competencies.")
     if arch_hits >= 2:
-        feedback_points.append("Demonstrated good consideration of system architecture and scalability.")
-    if word_count > 60:
-        feedback_points.append("Structured response with sufficient depth.")
-    else:
-        feedback_points.append("Consider providing deeper real-world examples to strengthen evidence.")
+        feedback_points.append("Demonstrated solid grasp of system architecture and engineering trade-offs.")
+    if semantic_relevance > 0.15:
+        feedback_points.append("Strong contextual relevance directly answering the core problem prompt.")
+    if not feedback_points:
+        feedback_points.append("Response lacks concrete technical specifics. Elaborate with architecture details and real metrics.")
 
     return {
         "technical_score": scores["technical_correctness"],
@@ -196,34 +244,55 @@ def generate_final_interview_report(session_answers: List[Dict], job_title: str)
         strengths.append("Clear, concise articulation of concepts and trade-offs.")
     if avg_proj >= 75.0:
         strengths.append("High contextual depth regarding past implementation projects.")
-    if not strengths:
+    
+    if overall < 35.0:
+        strengths = ["Completed attendance and audio input verification."]
+    elif not strengths:
         strengths.append("Demonstrated foundational familiarity with modern development workflows.")
 
     weaknesses = []
-    if avg_tech < 70.0:
-        weaknesses.append("Could deepen precision in advanced architectural algorithms.")
-    if avg_prob < 70.0:
-        weaknesses.append("Opportunity to articulate more structured trade-off evaluations.")
-    if avg_comm < 70.0:
-        weaknesses.append("Answers would benefit from structured STAR-format storytelling.")
+    if overall < 40.0:
+        weaknesses.append("Answers lacked substantive domain content or repeatedly failed relevance checks.")
+        weaknesses.append("Severe deficit in demonstrated core technical and problem-solving skills.")
+        weaknesses.append("Unable to verify hands-on production engineering experience.")
+    else:
+        if avg_tech < 70.0:
+            weaknesses.append("Could deepen precision in advanced architectural algorithms.")
+        if avg_prob < 70.0:
+            weaknesses.append("Opportunity to articulate more structured trade-off evaluations.")
+        if avg_comm < 70.0:
+            weaknesses.append("Answers would benefit from structured STAR-format storytelling.")
+    
     if not weaknesses:
         weaknesses.append("Minor opportunities to incorporate quantitative production metrics.")
 
-    gap_summary = (
-        f"Candidate scored an overall interview performance of {overall}/100. "
-        f"Strongest domain was {'Technical Competence' if avg_tech >= avg_prob else 'Problem Solving'}, "
-        f"with communication clarity measured at {avg_comm}/100."
-    )
-
-    suggestions = (
-        "Focus on providing specific quantitative metrics (e.g., latency reduction %, TPS handled) "
-        "when discussing production wins. Practice structured whiteboarding for distributed system bottlenecks."
-    )
-
-    recruiter_notes = (
-        f"AI Assessment Summary: Overall {overall}%. Candidate demonstrated verifiable skills. "
-        f"Recommendation: Review candidate's system design depth during live HR round."
-    )
+    if overall < 35.0:
+        gap_summary = (
+            f"Candidate scored an overall interview performance of {overall}/100. "
+            "Responses were non-responsive, repetitive, or lacked technical substance."
+        )
+        suggestions = (
+            "Prepare concrete, detailed technical explanations. Avoid monosyllabic or filler phrases. "
+            "Study foundational algorithms, data architectures, and role-specific tech stacks before re-interviewing."
+        )
+        recruiter_notes = (
+            f"AI Assessment Warning: Extremely low performance ({overall}%). "
+            "Candidate submitted answers that failed NLP semantic relevance checks. Recommendation: Do Not Proceed."
+        )
+    else:
+        gap_summary = (
+            f"Candidate scored an overall interview performance of {overall}/100. "
+            f"Strongest domain was {'Technical Competence' if avg_tech >= avg_prob else 'Problem Solving'}, "
+            f"with communication clarity measured at {avg_comm}/100."
+        )
+        suggestions = (
+            "Focus on providing specific quantitative metrics (e.g., latency reduction %, TPS handled) "
+            "when discussing production wins. Practice structured whiteboarding for distributed system bottlenecks."
+        )
+        recruiter_notes = (
+            f"AI Assessment Summary: Overall {overall}%. Candidate demonstrated verifiable skills. "
+            "Recommendation: Review candidate's system design depth during live HR round."
+        )
 
     return {
         "technical_rating": avg_tech,
