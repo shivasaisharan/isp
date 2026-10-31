@@ -112,3 +112,27 @@ All 10 backend integration and security test suites are passing (`10 passed in 8
 | **Backend REST API** | `8000` | **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)** |
 | **GitHub Repository** | Git | **[https://github.com/shivasaisharan/isp.git](https://github.com/shivasaisharan/isp.git)** |
 
+---
+
+## 5. Phase 12: HR Confirmed Hiring Decisions & Complete Decision History
+
+### A. Root Cause Analysis
+Prior to this release, rejected candidates and historical decision trails were not properly displayed in the Confirmed Hiring Decisions dashboard due to:
+1. **Model Limitations:** The legacy `HiringDecision` model enforced a 1-to-1 unique application constraint without preserving historical event chronologies.
+2. **Missing Decision History Pipeline:** Earlier rejection transitions updated the application status directly without creating dedicated immutable decision records.
+3. **Data Display Discrepancies:** The frontend only recognized `selected` and omitted candidate demographics, reviewer identities, and position metadata.
+
+### B. Architecture & Resolution
+- **Dedicated Table (`hr_decision_history`):** Added `HrDecisionHistory` with foreign keys, indexes, and immutable audit fields (`id`, `organization_id`, `application_id`, `candidate_id`, `job_id`, `reviewer_id`, `decision`, `decision_notes`, `previous_status`, `new_status`, `decided_at`).
+- **Transactional Decision Engine:** Implemented `record_hr_decision_workflow` ensuring that updating application status, inserting into `hr_decision_history`, writing audit logs, notifying candidates, and upserting legacy records succeed atomically.
+- **Idempotent Historical Recovery Migration:** Implemented `recover_historical_decisions` that automatically backfills pre-existing accepted/selected/rejected applications into `hr_decision_history` without duplicating records or fabricating data.
+- **REST APIs:** Implemented `/api/v1/hr/decisions`, `/api/v1/hr/decisions/summary`, `/api/v1/hr/decisions/{id}`, and `/api/v1/hr/decisions/export`.
+- **Comprehensive HR Dashboard (`HrDecisions.jsx`):**
+  - Live summary cards: Total Decisions, Total Accepted, Total Rejected, Decisions This Month.
+  - Multi-criteria filtering: Decision outcome tabs (All, Accepted, Rejected), candidate search, job title search, reviewer selector, and date range filters.
+  - Interactive history table with color-coded decision badges (Green ACCEPTED / Red REJECTED).
+  - "View Details" modal surfacing candidate credentials, position, reviewer details, status transitions, full decision notes, and fit metrics.
+  - Audit CSV export and page refresh capabilities.
+- **Automated Verification:** Added `tests/test_hr_decision_history.py` covering all 12 validation scenarios. 15 of 15 backend tests pass.
+
+

@@ -318,6 +318,31 @@ class HiringDecision(Base):
     application = relationship("Application", back_populates="hiring_decision")
 
 
+class HrDecisionHistory(Base):
+    __tablename__ = "hr_decision_history"
+    
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id = Column(String(36), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    candidate_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    job_id = Column(String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    reviewer_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    
+    decision = Column(String(50), nullable=False, index=True)  # 'ACCEPTED', 'REJECTED'
+    decision_notes = Column(Text, nullable=False)
+    previous_status = Column(String(50), nullable=True)
+    new_status = Column(String(50), nullable=False)
+    decided_at = Column(DateTime, default=utc_now, nullable=False, index=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    organization = relationship("Organization")
+    application = relationship("Application", backref="decision_history_records")
+    candidate = relationship("User", foreign_keys=[candidate_id])
+    job = relationship("Job")
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+
+
 class UserActivityEvent(Base):
     __tablename__ = "user_activity_events"
     

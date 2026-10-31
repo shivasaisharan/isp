@@ -264,6 +264,44 @@ class HiringDecisionOut(BaseModel):
     decided_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
+class HrDecisionHistoryOut(BaseModel):
+    id: str
+    organization_id: str
+    application_id: str
+    candidate_id: str
+    job_id: str
+    reviewer_id: Optional[str] = None
+    decision: str
+    decision_notes: str
+    previous_status: Optional[str] = None
+    new_status: str
+    decided_at: datetime
+    created_at: datetime
+    candidate_name: Optional[str] = None
+    candidate_email: Optional[str] = None
+    candidate_alias: Optional[str] = None
+    job_title: Optional[str] = None
+    job_department: Optional[str] = None
+    reviewer_name: Optional[str] = None
+    reviewer_email: Optional[str] = None
+    resume_match_score: Optional[float] = None
+    interview_score: Optional[float] = None
+    overall_fit_score: Optional[float] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class HrDecisionSummaryOut(BaseModel):
+    total_decisions: int
+    total_accepted: int
+    total_rejected: int
+    decisions_this_month: int
+
+class HrDecisionHistoryPageOut(BaseModel):
+    items: List[HrDecisionHistoryOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
 # --- Activity & Notification Schemas ---
 class UserActivityEventOut(BaseModel):
     id: str
