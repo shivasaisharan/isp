@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  Award, ArrowLeft, ShieldCheck, CheckCircle2, AlertTriangle, Eye, CheckSquare, XCircle, Clock, ShieldAlert, Sparkles
+  Award, ArrowLeft, ShieldCheck, CheckCircle2, AlertTriangle, Eye, CheckSquare, XCircle, Clock, ShieldAlert, Sparkles, X, Check
 } from 'lucide-react';
 import api from '../../services/api';
 
@@ -12,12 +12,11 @@ export default function HrTopCandidates() {
   const [loading, setLoading] = useState(true);
 
   // Decision Modal State
-  const [decisionModalOpen, setDecisionModalOpen] = useState(false);
+  const [modalType, setModalType] = useState(null); // 'accept' | 'reject' | null
   const [activeCandidate, setActiveCandidate] = useState(null);
-  const [decisionType, setDecisionType] = useState('selected');
-  const [rationale, setRationale] = useState('');
-  const [submittingDecision, setSubmittingDecision] = useState(false);
-  const [successMsg, setSuccessMsg] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [feedbackMsg, setFeedbackMsg] = useState({ type: '', text: '' });
 
   const fetchTopCandidates = async () => {
     try {
@@ -38,37 +37,87 @@ export default function HrTopCandidates() {
     fetchTopCandidates();
   }, [jobId]);
 
-  const openDecisionModal = (candidate) => {
-    setActiveCandidate(candidate);
-    setDecisionType('selected');
-    setRationale(`Candidate demonstrated strong competency in ${candidate.matched_skills.slice(0, 3).join(', ')}.`);
-    setDecisionModalOpen(true);
-    setSuccessMsg('');
-  };
-
-  const handleConfirmDecision = async (e) => {
-    e.preventDefault();
-    if (!rationale.trim()) {
-      alert("Please enter a job-related rationale for the decision record.");
+  // Open Accept Modal
+  const handleOpenAccept = (cand) => {
+    if (cand.status === 'accepted' || cand.status === 'selected') {
+      alert("This candidate has already been accepted.");
       return;
     }
-    setSubmittingDecision(true);
+    if (cand.status === 'rejected') {
+      alert("Cannot accept an already rejected candidate.");
+      return;
+    }
+    setActiveCandidate(cand);
+    setModalType('accept');
+    setNotes(`Candidate demonstrates strong alignment with role competencies (${cand.overall_score}% overall fit). Recommended for formal offer.`);
+    setFeedbackMsg({ type: '', text: '' });
+  };
+
+  // Open Reject Modal
+  const handleOpenReject = (cand) => {
+    if (cand.status === 'rejected') {
+      alert("This candidate has already been rejected.");
+      return;
+    }
+    if (cand.status === 'accepted' || cand.status === 'selected') {
+      alert("Cannot reject an already accepted candidate.");
+      return;
+    }
+    setActiveCandidate(cand);
+    setModalType('reject');
+    setNotes(`After thorough review of candidate profile and evaluation metrics (${cand.overall_score}% overall fit), team decided to proceed with other applicants.`);
+    setFeedbackMsg({ type: '', text: '' });
+  };
+
+  // Close Modal
+  const closeModal = () => {
+    setModalType(null);
+    setActiveCandidate(null);
+    setNotes('');
+    setFeedbackMsg({ type: '', text: '' });
+  };
+
+  // Confirm Final Hiring Decision
+  const handleConfirmDecision = async (e) => {
+    e.preventDefault();
+    if (!notes.trim()) {
+      alert("Please provide mandatory HR review notes before confirming.");
+      return;
+    }
+    if (!activeCandidate) return;
+
+    setSubmitting(true);
+    const decisionVal = modalType === 'accept' ? 'ACCEPTED' : 'REJECTED';
+    const newStatus = modalType === 'accept' ? 'accepted' : 'rejected';
 
     try {
-      await api.post('/decisions', {
-        application_id: activeCandidate.application_id,
-        decision: decisionType,
-        rationale: rationale
+      await api.post(`/hr/applications/${activeCandidate.application_id}/decision`, {
+        decision: decisionVal,
+        decision_notes: notes.trim()
       });
-      setSuccessMsg(`Decision confirmed: Candidate marked as ${decisionType.toUpperCase()}!`);
+
+      // Update state immediately without requiring page refresh
+      setCandidates(prev => prev.map(c => (
+        c.application_id === activeCandidate.application_id ? { ...c, status: newStatus } : c
+      )));
+
+      setFeedbackMsg({
+        type: 'success',
+        text: `Candidate successfully marked as ${decisionVal}!`
+      });
+
       setTimeout(() => {
-        setDecisionModalOpen(false);
+        closeModal();
         fetchTopCandidates();
-      }, 1500);
+      }, 1000);
     } catch (err) {
-      alert(err.response?.data?.detail || "Failed to submit hiring decision.");
+      console.error(err);
+      setFeedbackMsg({
+        type: 'error',
+        text: err.response?.data?.detail || "Failed to record hiring decision. Please try again."
+      });
     } finally {
-      setSubmittingDecision(false);
+      setSubmitting(false);
     }
   };
 
@@ -201,7 +250,7 @@ export default function HrTopCandidates() {
                 </div>
               </div>
 
-              {/* Bottom Actions: View Report & Human Hiring Decision */}
+              {/* Bottom Actions: View Report & Unified Human Hiring Decisions */}
               <div className="pt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <span className="text-[11px] text-slate-500 max-w-md">
                   {cand.assessment_limitations}
@@ -216,13 +265,38 @@ export default function HrTopCandidates() {
                     View Full Scorecard
                   </Link>
 
-                  <button
-                    onClick={() => openDecisionModal(cand)}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
-                  >
-                    <CheckSquare className="w-3.5 h-3.5" />
-                    Confirm Hiring Decision
-                  </button>
+                  {/* DYNAMIC DECISION CONTROLS (Rule: ACCEPTED -> SELECTED badge, REJECTED -> REJECTED badge, else Accept + Reject buttons) */}
+                  {cand.status === 'accepted' || cand.status === 'selected' ? (
+                    <span className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 shadow-sm uppercase tracking-wider">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      SELECTED
+                    </span>
+                  ) : cand.status === 'rejected' ? (
+                    <span className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-rose-500/10 text-rose-400 border border-rose-500/30 flex items-center gap-1.5 shadow-sm uppercase tracking-wider">
+                      <XCircle className="w-4 h-4 text-rose-400" />
+                      REJECTED
+                    </span>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAccept(cand)}
+                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Accept</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenReject(cand)}
+                        className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Reject</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -230,84 +304,130 @@ export default function HrTopCandidates() {
         </div>
       )}
 
-      {/* Human Hiring Decision Modal */}
-      {decisionModalOpen && activeCandidate && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-950 rounded-2xl max-w-lg w-full p-6 sm:p-8 border border-slate-800 shadow-2xl text-slate-100 animate-fadeIn">
-            <h3 className="text-lg font-bold text-white mb-1">Human Recruiter Hiring Decision</h3>
-            <p className="text-xs text-slate-400 mb-6">
-              Candidate: <span className="text-white font-semibold">{activeCandidate.candidate_name}</span> ({activeCandidate.anonymized_alias})
+      {/* =========================================================================
+          CONFIRMATION MODAL: ACCEPT / REJECT CANDIDATE
+          ========================================================================= */}
+      {modalType && activeCandidate && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`bg-slate-950 rounded-3xl max-w-lg w-full p-6 sm:p-8 border shadow-2xl text-slate-100 animate-fadeIn space-y-4 ${
+            modalType === 'accept' ? 'border-emerald-500/40' : 'border-rose-500/40'
+          }`}>
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-2xl border ${
+                modalType === 'accept'
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                  : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+              }`}>
+                {modalType === 'accept' ? (
+                  <CheckCircle2 className="w-6 h-6" />
+                ) : (
+                  <XCircle className="w-6 h-6" />
+                )}
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">
+                  {modalType === 'accept' ? 'Confirm Candidate Selection' : 'Confirm Candidate Rejection'}
+                </h3>
+                <p className="text-xs text-slate-400">Position: {job?.title}</p>
+              </div>
+            </div>
+
+            {/* Candidate & Scores Summary Card */}
+            <div className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-800">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Candidate</span>
+                  <span className="text-white font-bold">{activeCandidate.candidate_name}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Candidate ID</span>
+                  <span className="text-indigo-300 font-mono text-[11px] font-semibold">{activeCandidate.anonymized_alias || activeCandidate.candidate_id?.slice(0, 8)}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block">Overall Fit</span>
+                  <span className="text-sm font-extrabold text-emerald-400">{activeCandidate.overall_score || activeCandidate.overall_ranking_score}%</span>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block">Resume Match</span>
+                  <span className="text-sm font-bold text-slate-200">{activeCandidate.resume_match_score}%</span>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block">Interview Score</span>
+                  <span className="text-sm font-bold text-slate-200">{activeCandidate.interview_score !== null && activeCandidate.interview_score !== undefined ? `${activeCandidate.interview_score}%` : 'Pending'}</span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              {modalType === 'accept'
+                ? `Confirming this decision will update the application status to ACCEPTED across all HR dashboards, record an immutable audit trail, and notify the candidate.`
+                : `Confirming this decision will update the application status to REJECTED across all HR dashboards, record your justification in the compliance audit trail, and notify the candidate.`
+              }
             </p>
 
-            {successMsg && (
-              <div className="mb-4 p-3 bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs rounded-xl flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>{successMsg}</span>
+            {feedbackMsg.text && (
+              <div className={`p-3 text-xs rounded-xl border ${
+                feedbackMsg.type === 'success'
+                  ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+                  : 'bg-rose-950/60 border-rose-800 text-rose-300'
+              }`}>
+                {feedbackMsg.text}
               </div>
             )}
 
             <form onSubmit={handleConfirmDecision} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-300 uppercase mb-2">Select Decision Outcome</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDecisionType('selected')}
-                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${
-                      decisionType === 'selected' ? 'bg-emerald-600 text-white border-emerald-500 shadow-md' : 'bg-slate-900 text-slate-400 border-slate-800'
-                    }`}
-                  >
-                    Select for Offer
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDecisionType('on_hold')}
-                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${
-                      decisionType === 'on_hold' ? 'bg-amber-600 text-white border-amber-500 shadow-md' : 'bg-slate-900 text-slate-400 border-slate-800'
-                    }`}
-                  >
-                    Put On Hold
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDecisionType('rejected')}
-                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${
-                      decisionType === 'rejected' ? 'bg-rose-600 text-white border-rose-500 shadow-md' : 'bg-slate-900 text-slate-400 border-slate-800'
-                    }`}
-                  >
-                    Reject Candidate
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-300 uppercase mb-1">
-                  Mandatory Recruiter Rationale (Audit Trail)
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                  {modalType === 'accept' ? 'Decision Notes' : 'Rejection Reason'} <span className={modalType === 'accept' ? 'text-emerald-400' : 'text-rose-400'}>*</span>
                 </label>
                 <textarea
                   rows={4}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={
+                    modalType === 'accept'
+                      ? "Enter official hiring rationale and offer considerations..."
+                      : "Enter objective justification for not advancing this candidate..."
+                  }
+                  className={`w-full bg-slate-900 border rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none ${
+                    modalType === 'accept' ? 'border-slate-800 focus:border-emerald-500' : 'border-slate-800 focus:border-rose-500'
+                  }`}
                   required
-                  value={rationale}
-                  onChange={(e) => setRationale(e.target.value)}
-                  placeholder="Record your objective justification for this decision (e.g. exceptional distributed system experience, cultural fit)..."
-                  className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                 />
               </div>
 
-              <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
+              <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setDecisionModalOpen(false)}
-                  className="px-4 py-2 border border-slate-700 text-xs font-bold text-slate-300 rounded-xl hover:bg-slate-900"
+                  onClick={closeModal}
+                  disabled={submitting}
+                  className="px-4 py-2 bg-slate-900 border border-slate-800 text-slate-400 hover:text-white rounded-xl text-xs font-semibold transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={submittingDecision}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50"
+                  disabled={submitting}
+                  className={`px-5 py-2 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5 ${
+                    modalType === 'accept'
+                      ? 'bg-emerald-600 hover:bg-emerald-500'
+                      : 'bg-rose-600 hover:bg-rose-500'
+                  }`}
                 >
-                  {submittingDecision ? 'Recording Immutable Audit...' : 'Confirm Final Decision'}
+                  {modalType === 'accept' ? (
+                    <CheckCircle2 className="w-4 h-4" />
+                  ) : (
+                    <XCircle className="w-4 h-4" />
+                  )}
+                  {submitting
+                    ? 'Processing Decision...'
+                    : modalType === 'accept'
+                    ? 'Confirm Acceptance'
+                    : 'Confirm Rejection'
+                  }
                 </button>
               </div>
             </form>

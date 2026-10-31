@@ -9,13 +9,15 @@ from app.models.models import (
     User, HrDecisionHistory, OrganizationMembership, Application, Job, InterviewSession
 )
 from app.schemas.schemas import (
-    HrDecisionHistoryPageOut, HrDecisionSummaryOut, HrDecisionHistoryOut
+    HrDecisionHistoryPageOut, HrDecisionSummaryOut, HrDecisionHistoryOut,
+    ApplicationDecisionRequest, ApplicationDecisionResponse
 )
 from app.services.decision_service import (
     get_hr_decision_history_paginated,
     get_hr_decision_summary_counts,
     export_hr_decisions_csv,
-    get_organization_reviewers_list
+    get_organization_reviewers_list,
+    record_hr_decision_workflow
 )
 from app.services.ranking_service import calculate_composite_rank_score
 
@@ -84,6 +86,40 @@ def list_hr_reviewers(
     )
 
 hr_base_router = APIRouter(prefix="/hr", tags=["HR Reviewers Management"])
+
+@hr_base_router.post("/applications/{application_id}/decision", response_model=ApplicationDecisionResponse)
+def submit_hr_application_decision_direct(
+    application_id: str,
+    payload: ApplicationDecisionRequest,
+    hr_user: User = Depends(require_hr),
+    membership: OrganizationMembership = Depends(get_current_hr_membership),
+    db: Session = Depends(get_db)
+):
+    """
+    Unified HR Hiring Decision Endpoint:
+    POST /api/v1/hr/applications/{application_id}/decision
+    Accepts: { "decision": "ACCEPTED"|"REJECTED", "decision_notes": "..." }
+    """
+    notes_val = payload.decision_notes or payload.notes or payload.rationale or ""
+    history_rec, legacy_rec = record_hr_decision_workflow(
+        db=db,
+        hr_user=hr_user,
+        membership=membership,
+        application_id=application_id,
+        raw_decision=payload.decision,
+        notes=notes_val
+    )
+    return {
+        "message": f"Candidate successfully marked as {history_rec.decision}!",
+        "decision": history_rec.decision,
+        "status": history_rec.new_status,
+        "application_id": history_rec.application_id,
+        "candidate_id": history_rec.candidate_id,
+        "job_id": history_rec.job_id,
+        "reviewer_id": hr_user.id,
+        "decision_notes": history_rec.decision_notes,
+        "decided_at": history_rec.decided_at
+    }
 
 @hr_base_router.get("/reviewers")
 def list_hr_reviewers_direct(

@@ -6,7 +6,10 @@ from app.models.models import (
     Application, ApplicationStatusHistory, Job, ResumeFile, User, OrganizationMembership,
     InterviewSession, InterviewReport, InterviewQuestion, InterviewAnswer, HiringDecision
 )
-from app.schemas.schemas import ApplicationCreate, ApplicationOut, ApplicationStatusUpdate, JobSummary, DecisionActionRequest
+from app.schemas.schemas import (
+    ApplicationCreate, ApplicationOut, ApplicationStatusUpdate, JobSummary,
+    DecisionActionRequest, ApplicationDecisionRequest, ApplicationDecisionResponse
+)
 from app.services.resume_service import analyze_resume_against_job
 from app.services.notification_service import create_notification, record_user_activity, record_audit_log
 from app.core.rubric import calculate_composite_rank_score, INTERVIEW_RUBRIC
@@ -582,6 +585,41 @@ def update_application_status(
     out = ApplicationOut.model_validate(app)
     out.job = JobSummary(id=app.job.id, title=app.job.title, department=app.job.department, location=app.job.location)
     return out
+
+@router.post("/{application_id}/decision", response_model=ApplicationDecisionResponse)
+def submit_application_decision(
+    application_id: str,
+    payload: ApplicationDecisionRequest,
+    hr_user: User = Depends(require_hr),
+    membership: OrganizationMembership = Depends(get_current_hr_membership),
+    db: Session = Depends(get_db)
+):
+    """
+    Unified Application Hiring Decision Endpoint:
+    POST /api/v1/applications/{application_id}/decision
+    Accepts: { "decision": "ACCEPTED"|"REJECTED", "decision_notes": "..." }
+    """
+    from app.services.decision_service import record_hr_decision_workflow
+    notes_val = payload.decision_notes or payload.notes or payload.rationale or ""
+    history_rec, legacy_rec = record_hr_decision_workflow(
+        db=db,
+        hr_user=hr_user,
+        membership=membership,
+        application_id=application_id,
+        raw_decision=payload.decision,
+        notes=notes_val
+    )
+    return {
+        "message": f"Candidate successfully marked as {history_rec.decision}!",
+        "decision": history_rec.decision,
+        "status": history_rec.new_status,
+        "application_id": history_rec.application_id,
+        "candidate_id": history_rec.candidate_id,
+        "job_id": history_rec.job_id,
+        "reviewer_id": hr_user.id,
+        "decision_notes": history_rec.decision_notes,
+        "decided_at": history_rec.decided_at
+    }
 
 @router.post("/{application_id}/accept")
 def accept_application_route(

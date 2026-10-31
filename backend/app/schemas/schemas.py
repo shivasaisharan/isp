@@ -234,7 +234,7 @@ class TopCandidateRecommendation(BaseModel):
     candidate_name: str
     anonymized_alias: str
     resume_match_score: float
-    interview_score: float
+    interview_score: Optional[float] = None
     required_skills_score: float
     overall_score: float
     status: str
@@ -245,10 +245,30 @@ class TopCandidateRecommendation(BaseModel):
     assessment_limitations: str
     has_interview_report: bool
     report_id: Optional[str] = None
+    assessment_status: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Hiring Decision Schemas ---
 class DecisionActionRequest(BaseModel):
     notes: str = Field(..., min_length=3, description="Mandatory HR decision rationale/notes")
+
+class ApplicationDecisionRequest(BaseModel):
+    decision: str = Field(..., description="ACCEPTED or REJECTED")
+    decision_notes: Optional[str] = Field(None, description="Mandatory HR decision rationale/notes")
+    notes: Optional[str] = Field(None, description="Alias for decision_notes")
+    rationale: Optional[str] = Field(None, description="Alias for decision_notes")
+
+class ApplicationDecisionResponse(BaseModel):
+    message: str
+    decision: str
+    status: str
+    application_id: str
+    candidate_id: str
+    job_id: str
+    reviewer_id: Optional[str] = None
+    decision_notes: str
+    decided_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 class HiringDecisionCreate(BaseModel):
     application_id: str

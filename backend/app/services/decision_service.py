@@ -169,6 +169,11 @@ def record_hr_decision_workflow(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Candidate application has already been accepted."
             )
+        if app.status == "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot accept an already rejected candidate. Conflicting final hiring decisions are blocked."
+            )
         target_status = "selected" if raw_decision.lower() == "selected" else "accepted"
         legacy_decision_val = "selected" if raw_decision.lower() == "selected" else "accepted"
     else:
@@ -176,6 +181,11 @@ def record_hr_decision_workflow(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Candidate application has already been rejected."
+            )
+        if app.status in ["accepted", "selected"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot reject an already accepted candidate. Conflicting final hiring decisions are blocked."
             )
         target_status = "rejected"
         legacy_decision_val = "rejected"
