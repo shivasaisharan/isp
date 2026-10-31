@@ -150,5 +150,41 @@ Prior to this release, rejected candidates and historical decision trails were n
   - Loading, empty ("No HR reviewers found for this organization"), and error fallback states.
 - **Automated Test Coverage:** Verified dynamic reviewer endpoints, tenant isolation, and multi-criteria composite filtering in `backend/tests/test_hr_decision_history.py` (15/15 tests passing).
 
+---
+
+## 7. Phase 14: Candidate Activity History Cleanup & Recruitment Event Tracking
+
+### A. Problem Statement
+The Candidate Portal's Activity History previously displayed repetitive authentication/session noise (e.g., hundreds of `LOGIN` and `LOGOUT` entries) and lacked structured recruitment event tracking, giving candidates no meaningful visibility into their application lifecycle.
+
+### B. Architecture & Resolution
+- **Auth Noise Filtered (Without Audit Log Loss):** Excluded `login`, `logout`, `session_created`, `session_expired`, `token_refreshed`, `page_visit`, `dashboard_opened`, `navigation_event`, and `browser_focus` from candidate-facing feeds while preserving all raw audit logs for system security and administrative compliance.
+- **Dedicated Table (`candidate_recruitment_activities`):** Added `CandidateRecruitmentActivity` model with UUID primary keys, relationships to `User`, `Application`, `Job`, and `Organization`, JSON metadata, and timestamps.
+- **14 Essential Recruitment Events Across 4 Categories:**
+  1. *Resume:* `RESUME_UPLOADED`, `RESUME_UPDATED`, `RESUME_ANALYZED`, `RESUME_DELETED`
+  2. *Job Applications:* `APPLICATION_SUBMITTED`, `APPLICATION_STATUS_UPDATED`, `APPLICATION_WITHDRAWN`
+  3. *AI Interviews:* `INTERVIEW_SCHEDULED`, `INTERVIEW_STARTED`, `INTERVIEW_COMPLETED`, `ASSESSMENT_GENERATED`
+  4. *Hiring Decisions:* `APPLICATION_ACCEPTED`, `APPLICATION_REJECTED`, `NEXT_ROUND`
+- **Automatic Event Hooks:** Seamlessly integrated into backend business operations:
+  - `apply_for_job()` generates `APPLICATION_SUBMITTED` with company and role metadata.
+  - Resume upload/analyze/delete operations emit `RESUME_UPLOADED`, `RESUME_ANALYZED`, and `RESUME_DELETED`.
+  - Interview start/complete emit `INTERVIEW_STARTED` and `INTERVIEW_COMPLETED` with score summaries.
+  - HR decision workflow records `APPLICATION_ACCEPTED` and `APPLICATION_REJECTED`.
+- **Idempotent Historical Recovery Migration:** `backfill_historical_recruitment_activities` automatically runs on startup, safely converting existing resumes, applications, and completed interviews into recruitment activity records without duplication.
+- **REST APIs:**
+  - `GET /api/v1/candidate/activities`: Paginated, multi-filter endpoint (`category`, `company_name`, `job_title`, `start_date`, `end_date`, `sort_order`, `page`, `page_size`).
+  - `GET /api/v1/candidate/activities/summary`: Real-time candidate metrics (Resumes Uploaded, Jobs Applied, Interviews Completed, Applications Accepted).
+  - Cleaned up legacy `GET /api/v1/activity`.
+- **Candidate UI Redesign (`CandidateActivity.jsx`):**
+  - Modern heading: **Candidate Activity** with subtitle: *"Track your recruitment journey, resume updates, job applications, AI interviews and hiring decisions in one place."*
+  - 4 Summary metric cards with distinct accent colors and icons.
+  - Category filter pills: All Activities, Resume Activities, Job Applications, AI Interviews, Hiring Decisions.
+  - Search input (company & job title), date range pickers, sort order toggle, and filter reset.
+  - Rich timeline items displaying event icons, formatted titles, company/job tags, human-readable relative/exact timestamps, status badges, and `APP-XXXXXX` reference badges.
+  - Pagination controls and empty states with "Explore Open Jobs" action.
+- **Supabase Migration:** Created `supabase/migrations/20261031_candidate_recruitment_activities.sql` with table definitions and Row Level Security (RLS) policies ensuring candidates only access their own recruitment milestones.
+- **Automated Verification:** Added `backend/tests/test_candidate_activities.py`. All 19 backend tests across all test suites pass with 100% success; frontend production build passes cleanly.
+
+
 
 

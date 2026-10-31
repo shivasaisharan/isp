@@ -217,6 +217,13 @@ def generate_final_interview_report(session_answers: List[Dict], job_title: str)
             "weaknesses": ["Insufficient answer data"],
             "skill_gap_summary": "Incomplete evaluation due to missing responses.",
             "suggestions_for_improvement": "Provide comprehensive answers to all questions.",
+            "transparency_breakdown": {
+                "technical_weight": "35%",
+                "problem_solving_weight": "25%",
+                "skills_weight": "20%",
+                "communication_weight": "10%",
+                "project_weight": "10%"
+            },
             "candidate_visible_feedback": "Your interview session was recorded.",
             "recruiter_confidential_notes": "Session contains sparse data."
         }

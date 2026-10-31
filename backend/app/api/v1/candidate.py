@@ -139,6 +139,16 @@ async def upload_resume(
         metadata_json={"skills": extracted_skills[:6]}
     )
 
+    from app.services.activity_service import record_recruitment_activity
+    record_recruitment_activity(
+        db=db,
+        candidate_id=candidate.id,
+        activity_type="RESUME_UPLOADED",
+        activity_title="Resume Uploaded",
+        activity_description=f"You uploaded your resume: {file.filename}.",
+        metadata_json={"filename": file.filename, "file_id": resume_record.id, "extracted_skills_count": len(extracted_skills)}
+    )
+
     return {
         "id": resume_record.id,
         "file_name": resume_record.file_name,
@@ -205,6 +215,17 @@ def analyze_resume(
         metadata_json={"match_score": analysis["match_score"]}
     )
 
+    from app.services.activity_service import record_recruitment_activity
+    record_recruitment_activity(
+        db=db,
+        candidate_id=candidate.id,
+        activity_type="RESUME_ANALYZED",
+        activity_title="Resume Analysis Completed",
+        activity_description=f"Resume analysis completed for {resume.file_name} targeting {job_title} with {analysis['match_score']}% match.",
+        job_id=job_id,
+        metadata_json={"filename": resume.file_name, "match_score": analysis["match_score"], "target_job": job_title}
+    )
+
     return {
         "report_id": report.id,
         "target_job": job_title,
@@ -247,6 +268,16 @@ def delete_resume(
     file_name = resume.file_name
     db.delete(resume)
     db.commit()
+
+    from app.services.activity_service import record_recruitment_activity
+    record_recruitment_activity(
+        db=db,
+        candidate_id=candidate.id,
+        activity_type="RESUME_DELETED",
+        activity_title="Resume Removed",
+        activity_description=f"You removed resume: {file_name}.",
+        metadata_json={"filename": file_name}
+    )
 
     record_user_activity(
         db=db,

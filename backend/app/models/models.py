@@ -358,6 +358,29 @@ class UserActivityEvent(Base):
     user = relationship("User", back_populates="activity_events")
 
 
+class CandidateRecruitmentActivity(Base):
+    __tablename__ = "candidate_recruitment_activities"
+
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    candidate_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id = Column(String(36), ForeignKey("applications.id", ondelete="CASCADE"), nullable=True, index=True)
+    job_id = Column(String(36), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    company_id = Column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    activity_type = Column(String(50), nullable=False, index=True)
+    activity_title = Column(String(150), nullable=False)
+    activity_description = Column(Text, nullable=False)
+    metadata_json = Column(JSON, default=dict, nullable=False)
+    occurred_at = Column(DateTime, default=utc_now, nullable=False, index=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    candidate = relationship("User", backref="recruitment_activities")
+    application = relationship("Application")
+    job = relationship("Job")
+    company = relationship("Organization")
+
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     

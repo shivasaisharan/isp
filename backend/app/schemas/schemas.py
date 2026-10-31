@@ -313,6 +313,37 @@ class UserActivityEventOut(BaseModel):
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
+class CandidateRecruitmentActivityOut(BaseModel):
+    id: str
+    candidate_id: str
+    application_id: Optional[str] = None
+    job_id: Optional[str] = None
+    company_id: Optional[str] = None
+    activity_type: str
+    activity_title: str
+    activity_description: str
+    metadata_json: Dict[str, Any] = {}
+    occurred_at: datetime
+    created_at: datetime
+    company_name: Optional[str] = None
+    job_title: Optional[str] = None
+    category: Optional[str] = None
+    status_badge: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class CandidateActivitySummaryOut(BaseModel):
+    total_resumes_uploaded: int
+    total_jobs_applied: int
+    interviews_completed: int
+    applications_accepted: int
+
+class CandidateRecruitmentActivityPageOut(BaseModel):
+    items: List[CandidateRecruitmentActivityOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
 class NotificationOut(BaseModel):
     id: str
     title: str

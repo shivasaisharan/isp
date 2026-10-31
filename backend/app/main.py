@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal
 from app.services.seed_service import seed_database
 from app.services.decision_service import recover_historical_decisions
+from app.services.activity_service import backfill_historical_recruitment_activities
 
 # Routers
 from app.api.v1.auth import router as auth_router
@@ -19,7 +20,7 @@ from app.api.v1.reports import router as reports_router
 from app.api.v1.rankings import router as rankings_router
 from app.api.v1.decisions import router as decisions_router
 from app.api.v1.hr_decisions import router as hr_decisions_router, hr_base_router
-from app.api.v1.activity import router as activity_router
+from app.api.v1.activity import router as activity_router, candidate_activities_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.organization import router as organization_router
 from app.api.v1.analytics import router as analytics_router
@@ -34,6 +35,9 @@ async def lifespan(app: FastAPI):
         recovered = recover_historical_decisions(db)
         if recovered > 0:
             print(f"[Decision History Migration] Successfully recovered {recovered} historical decision records.")
+        backfilled_activities = backfill_historical_recruitment_activities(db)
+        if backfilled_activities > 0:
+            print(f"[Activity History Migration] Successfully backfilled {backfilled_activities} recruitment activity records.")
     finally:
         db.close()
     yield
@@ -72,6 +76,7 @@ app.include_router(decisions_router, prefix=prefix)
 app.include_router(hr_decisions_router, prefix=prefix)
 app.include_router(hr_base_router, prefix=prefix)
 app.include_router(activity_router, prefix=prefix)
+app.include_router(candidate_activities_router, prefix=prefix)
 app.include_router(notifications_router, prefix=prefix)
 app.include_router(organization_router, prefix=prefix)
 app.include_router(analytics_router, prefix=prefix)

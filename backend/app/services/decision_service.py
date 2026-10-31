@@ -273,6 +273,34 @@ def record_hr_decision_workflow(
         }
     )
 
+    # 7. Record candidate recruitment activity
+    from app.services.activity_service import record_recruitment_activity
+    comp_name = app.job.organization.name if (app.job and app.job.organization) else "Company"
+    if norm_decision == "ACCEPTED":
+        record_recruitment_activity(
+            db=db,
+            candidate_id=app.candidate_id,
+            activity_type="APPLICATION_ACCEPTED",
+            activity_title="Application Accepted",
+            activity_description=f"Your application for {app.job.title} at {comp_name} was accepted by the recruitment team.",
+            application_id=app.id,
+            job_id=app.job_id,
+            company_id=app.job.organization_id,
+            metadata_json={"company_name": comp_name, "job_title": app.job.title, "status": "ACCEPTED", "application_ref": f"APP-{app.id[:8].upper()}"}
+        )
+    else:
+        record_recruitment_activity(
+            db=db,
+            candidate_id=app.candidate_id,
+            activity_type="APPLICATION_REJECTED",
+            activity_title="Application Update",
+            activity_description=f"Your application for {app.job.title} at {comp_name} has concluded at this stage.",
+            application_id=app.id,
+            job_id=app.job_id,
+            company_id=app.job.organization_id,
+            metadata_json={"company_name": comp_name, "job_title": app.job.title, "status": "REJECTED", "application_ref": f"APP-{app.id[:8].upper()}"}
+        )
+
     # Commit atomic transaction
     db.commit()
     db.refresh(history_record)

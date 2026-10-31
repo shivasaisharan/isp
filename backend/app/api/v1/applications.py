@@ -102,6 +102,24 @@ def apply_to_job(
         metadata_json={"job_id": job.id, "match_score": resume_match}
     )
 
+    from app.services.activity_service import record_recruitment_activity
+    comp_name = job.organization.name if job.organization else "Company"
+    record_recruitment_activity(
+        db=db,
+        candidate_id=candidate.id,
+        activity_type="APPLICATION_SUBMITTED",
+        activity_title="Job Application Submitted",
+        activity_description=f"You successfully applied for {job.title} at {comp_name}.",
+        application_id=app.id,
+        job_id=job.id,
+        company_id=job.organization_id,
+        metadata_json={
+            "company_name": comp_name,
+            "job_title": job.title,
+            "application_ref": f"APP-{app.id[:8].upper()}"
+        }
+    )
+
     create_notification(
         db=db,
         user_id=candidate.id,

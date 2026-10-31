@@ -137,6 +137,20 @@ def start_or_resume_interview(
         metadata_json={"job_id": job.id, "questions_count": len(db_questions)}
     )
 
+    from app.services.activity_service import record_recruitment_activity
+    comp_name = job.organization.name if job.organization else "Company"
+    record_recruitment_activity(
+        db=db,
+        candidate_id=candidate.id,
+        activity_type="INTERVIEW_STARTED",
+        activity_title="AI Interview Started",
+        activity_description=f"You began the AI interview for {job.title} at {comp_name}.",
+        application_id=app.id,
+        job_id=job.id,
+        company_id=job.organization_id,
+        metadata_json={"company_name": comp_name, "job_title": job.title, "application_ref": f"APP-{app.id[:8].upper()}"}
+    )
+
     first_q = InterviewQuestionOut(
         id=db_questions[0].id,
         question_index=0,
@@ -336,7 +350,7 @@ def finalize_interview(
             weaknesses=report_data["weaknesses"],
             skill_gap_summary=report_data["skill_gap_summary"],
             suggestions_for_improvement=report_data["suggestions_for_improvement"],
-            transparency_breakdown=report_data["transparency_breakdown"],
+            transparency_breakdown=report_data.get("transparency_breakdown", {}),
             candidate_visible_feedback=report_data["candidate_visible_feedback"],
             recruiter_confidential_notes=report_data["recruiter_confidential_notes"]
         )
@@ -374,6 +388,25 @@ def finalize_interview(
         resource_id=report.id,
         description=f"Completed AI interview for '{job.title}'. Overall score: {report.overall_score}%.",
         metadata_json={"overall_score": report.overall_score}
+    )
+
+    from app.services.activity_service import record_recruitment_activity
+    comp_name = job.organization.name if job.organization else "Company"
+    record_recruitment_activity(
+        db=db,
+        candidate_id=candidate.id,
+        activity_type="INTERVIEW_COMPLETED",
+        activity_title="AI Interview Completed",
+        activity_description=f"You completed the AI interview for {job.title} at {comp_name} with overall evaluation score {report.overall_score}%.",
+        application_id=app.id,
+        job_id=job.id,
+        company_id=job.organization_id,
+        metadata_json={
+            "company_name": comp_name,
+            "job_title": job.title,
+            "score": report.overall_score,
+            "application_ref": f"APP-{app.id[:8].upper()}"
+        }
     )
 
     create_notification(
