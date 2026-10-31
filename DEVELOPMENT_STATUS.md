@@ -51,6 +51,38 @@
 | **Phase 7** | **HR Intelligence** | Top-5 ranking board, Candidate compare, Human decision | **COMPLETED** |
 | **Phase 8** | **Analytics & Admin** | Radar competency charts, Audit trails, System telemetry | **COMPLETED** |
 | **Phase 9** | **Secure Full-Screen Proctoring** | Full-screen enforcement, 3-strike violation policy, HR security audit report | **COMPLETED** |
+| **Phase 10** | **Scorecard & Score Unification** | View Score in HR, dedicated `HrCandidateScorecard.jsx`, authoritative composite fit formula (40/40/20) | **COMPLETED** |
+
+---
+
+## 3. Discrepancy Investigation & Mathematical Resolution
+
+### The Problem Identified:
+- **Candidate Portal:** Displayed `0.8%` (or `40.5%`) with the header mistakenly labeled `"Overall Fit Score"`.
+- **HR Portal:** Displayed `18.2%` under `"Overall Fit"`.
+
+### Root Cause Analysis:
+1. **Interview Assessment Score:**
+   The AI Interview Room scores 5 technical dimensions on a 0-100 scale:
+   $$\text{Interview Score} = (\text{Technical} \times 0.35) + (\text{Problem Solving} \times 0.25) + (\text{Job Skills} \times 0.20) + (\text{Communication} \times 0.10) + (\text{Project Depth} \times 0.10)$$
+   When a candidate only articulates foundational communication ($8.0\%$) with other dimensions at zero:
+   $$(0 \times 0.35) + (0 \times 0.25) + (0 \times 0.20) + (8.0 \times 0.10) + (0 \times 0.10) = 0.8\%$$
+   This was the candidate's **Interview Assessment Score**, but the UI banner erroneously labeled it "Overall Fit Score".
+
+2. **Legacy Ranking Weights:**
+   The legacy `rubric.py` previously evaluated composite rank using $30\%$ resume, $50\%$ interview, and $20\%$ skills:
+   $$(31.6 \times 0.30) + (0.8 \times 0.50) + (41.7 \times 0.20) = 9.48 + 0.40 + 8.34 = 18.22\% \rightarrow \mathbf{18.2\%}$$
+
+### Authoritative Resolution:
+The system now enforces one authoritative formula across all candidate and HR interfaces:
+$$\mathbf{\text{Overall Candidate Fit} = (\text{Resume Match} \times 0.40) + (\text{Interview Assessment} \times 0.40) + (\text{Verified Skills} \times 0.20)}$$
+
+Applying the verified formula to candidate data:
+$$(31.6 \times 0.40) + (0.8 \times 0.40) + (41.7 \times 0.20) = 12.64 + 0.32 + 8.34 = \mathbf{21.3\%}$$
+
+Both interfaces now clearly distinguish:
+- **Interview Assessment Score:** Candidate voice interview performance ($0.8\%$ or $40.5\%$).
+- **Overall Candidate Fit Score:** Multi-signal composite ranking ($21.3\%$).
 
 ---
 

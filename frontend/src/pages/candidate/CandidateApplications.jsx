@@ -128,11 +128,17 @@ export default function CandidateApplications() {
                       <span className="font-bold text-slate-800">{app.resume_match_score}%</span>
                     </div>
                     <div>
+                      <span className="text-slate-400 block">Interview Score</span>
+                      <span className="font-bold text-indigo-600">
+                        {app.interview_score !== null && app.interview_score !== undefined ? `${app.interview_score}%` : 'Pending'}
+                      </span>
+                    </div>
+                    <div>
                       <span className="text-slate-400 block">Skills Coverage</span>
                       <span className="font-bold text-slate-800">{app.skills_match_score}%</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 block">Overall Ranking</span>
+                      <span className="text-slate-400 block">Overall Fit</span>
                       <span className="font-bold text-brand-600">{app.overall_ranking_score}%</span>
                     </div>
                   </div>

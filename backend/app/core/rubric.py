@@ -34,16 +34,19 @@ INTERVIEW_RUBRIC = {
     }
 }
 
-# Weights for Job-Specific Candidate Top-5 Ranking Model
+# Weights for Job-Specific Candidate Top-5 Ranking Model & Overall Candidate Fit
+# Standardized across HR applicant table, top-five candidate board, and candidate comparison:
+# Overall Candidate Fit = (Resume Match * 0.40) + (Interview Assessment * 0.40) + (Verified Skills * 0.20)
 RANKING_WEIGHTS = {
-    "resume_match": 0.30,       # 30% Resume semantic & experience fit
-    "interview_score": 0.50,    # 50% Comprehensive interview assessment
-    "required_skills": 0.20     # 20% Hard requirement coverage
+    "resume_match": 0.40,       # 40% Resume semantic & experience fit
+    "interview_score": 0.40,    # 40% Comprehensive AI interview assessment
+    "required_skills": 0.20     # 20% Hard requirement & verified skills coverage
 }
 
 def calculate_interview_composite_score(scores: dict) -> float:
     """
-    Computes overall score from individual dimension ratings (each 0 - 100).
+    Computes overall interview assessment score from 5 individual dimension ratings (each 0 - 100):
+    Interview Score = (Technical * 0.35) + (Problem Solving * 0.25) + (Job Skills * 0.20) + (Communication * 0.10) + (Project Depth * 0.10)
     """
     total = 0.0
     for key, spec in INTERVIEW_RUBRIC.items():
@@ -53,11 +56,18 @@ def calculate_interview_composite_score(scores: dict) -> float:
 
 def calculate_composite_rank_score(resume_match: float, interview_score: float, required_skills: float) -> float:
     """
-    Computes overall ranking score (0 - 100).
+    Authoritative composite ranking formula for Smart Recruit:
+    Overall Candidate Fit = (Resume Match * 0.40) + (Interview Assessment * 0.40) + (Verified Skills * 0.20)
+    All inputs normalized to 0-100 scale.
+    Example: (31.6 * 0.40) + (0.8 * 0.40) + (41.7 * 0.20) = 12.64 + 0.32 + 8.34 = 21.3%
     """
+    rm = max(0.0, min(100.0, float(resume_match or 0.0)))
+    iv = max(0.0, min(100.0, float(interview_score or 0.0)))
+    sk = max(0.0, min(100.0, float(required_skills or 0.0)))
+
     score = (
-        (resume_match * RANKING_WEIGHTS["resume_match"]) +
-        (interview_score * RANKING_WEIGHTS["interview_score"]) +
-        (required_skills * RANKING_WEIGHTS["required_skills"])
+        (rm * RANKING_WEIGHTS["resume_match"]) +
+        (iv * RANKING_WEIGHTS["interview_score"]) +
+        (sk * RANKING_WEIGHTS["required_skills"])
     )
     return round(min(100.0, max(0.0, score)), 1)

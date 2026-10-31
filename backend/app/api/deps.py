@@ -35,6 +35,7 @@ def get_current_user(
         )
     
     user_id = payload.get("sub")
+    email = payload.get("email")
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -42,6 +43,45 @@ def get_current_user(
         )
         
     user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if not user and email:
+        user = db.query(User).filter(User.email == email.lower(), User.is_active == True).first()
+        
+    # Auto-provision profile if authenticated by Supabase Auth but not yet in PostgreSQL
+    if not user and email:
+        meta = payload.get("user_metadata", {}) or {}
+        role = (meta.get("role") or payload.get("role", "candidate")).lower()
+        if role in ["hr", "org_admin"]:
+            role = "hr"
+        else:
+            role = "candidate"
+            
+        full_name = meta.get("full_name") or email.split("@")[0].capitalize()
+        user = User(
+            id=user_id,
+            email=email.lower(),
+            hashed_password="[SUPABASE_MANAGED_AUTH]",
+            full_name=full_name,
+            phone=meta.get("phone"),
+            role=role,
+            is_active=True
+        )
+        db.add(user)
+        db.flush()
+        
+        if role == "candidate":
+            from app.models.models import CandidateProfile
+            from app.services.resume_service import generate_anonymized_alias
+            profile = CandidateProfile(
+                user_id=user.id,
+                headline="Candidate Profile",
+                skills=[],
+                anonymized_alias=generate_anonymized_alias()
+            )
+            db.add(profile)
+            
+        db.commit()
+        db.refresh(user)
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

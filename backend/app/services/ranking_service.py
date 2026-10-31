@@ -38,17 +38,30 @@ def get_job_top_five_recommendations(db: Session, job_id: str) -> List[Dict[str,
         report: Optional[InterviewReport] = interview_session.report if interview_session else None
         
         has_report = report is not None
-        interview_score = report.overall_score if has_report else (50.0 if interview_session and interview_session.status == "in_progress" else 0.0)
+        interview_score = report.overall_score if has_report else None
 
-        # Composite ranking score: 30% resume, 50% interview, 20% required skills
+        # Composite ranking score: 40% resume, 40% interview, 20% required skills
+        # If interview is pending, calculate composite based on available signals (interview=0.0)
         overall_score = calculate_composite_rank_score(
             resume_match=app.resume_match_score,
-            interview_score=interview_score,
+            interview_score=report.overall_score if has_report else 0.0,
             required_skills=app.skills_match_score
         )
 
         # Update application ranking score in database for persistence
         app.overall_ranking_score = overall_score
+
+        # Determine exact assessment status
+        if has_report:
+            assessment_status = "Completed"
+        elif interview_session and interview_session.flagged_for_review:
+            assessment_status = "Terminated (Flagged)"
+        elif interview_session and interview_session.status == "in_progress":
+            assessment_status = "Interview In Progress"
+        elif app.status == "interview_pending":
+            assessment_status = "Assessment Pending"
+        else:
+            assessment_status = "Interview Not Started"
 
         # Extract strengths & gaps
         strengths = []
@@ -90,7 +103,8 @@ def get_job_top_five_recommendations(db: Session, job_id: str) -> List[Dict[str,
             "areas_for_review": areas_for_review or ["Conduct final HR round to confirm cultural alignment"],
             "assessment_limitations": limitations,
             "has_interview_report": has_report,
-            "report_id": report.id if report else None
+            "report_id": report.id if report else None,
+            "assessment_status": assessment_status
         })
 
     db.commit()

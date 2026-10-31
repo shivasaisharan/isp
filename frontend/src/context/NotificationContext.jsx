@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 import { useAuth } from './AuthContext';
+import { realtimeService } from '../services/realtimeService';
 
-const NotificationContext = createContext(null);
+export const NotificationContext = createContext(null);
 
 export const NotificationProvider = ({ children }) => {
   const { user } = useAuth();
@@ -25,9 +26,29 @@ export const NotificationProvider = ({ children }) => {
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
-  }, [fetchNotifications]);
+
+    // Setup Supabase Realtime listener if user is logged in
+    let sub = null;
+    if (user?.id) {
+      sub = realtimeService.subscribeToNotifications(user.id, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setNotifications(prev => [payload.new, ...prev]);
+          setUnreadCount(prev => prev + 1);
+        } else if (payload.eventType === 'UPDATE') {
+          setNotifications(prev => prev.map(n => n.id === payload.new.id ? payload.new : n));
+        } else {
+          fetchNotifications();
+        }
+      });
+    }
+
+    // Fallback periodic poll every 45s
+    const interval = setInterval(fetchNotifications, 45000);
+    return () => {
+      clearInterval(interval);
+      if (sub?.unsubscribe) sub.unsubscribe();
+    };
+  }, [fetchNotifications, user?.id]);
 
   const markAsRead = async (id) => {
     try {
@@ -63,4 +84,3 @@ export const NotificationProvider = ({ children }) => {
 };
 
 export const useNotifications = () => useContext(NotificationContext);
-

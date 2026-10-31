@@ -69,7 +69,7 @@ export default function CandidateReport() {
         </div>
         <div className="text-right">
           <span className="text-4xl font-extrabold text-white">{report.overall_score}%</span>
-          <span className="text-[11px] block text-brand-300 font-semibold uppercase tracking-wider">Overall Fit Score</span>
+          <span className="text-[11px] block text-brand-300 font-semibold uppercase tracking-wider">Interview Assessment Score</span>
         </div>
       </div>
 

@@ -154,12 +154,12 @@ export default function HrTopCandidates() {
                 <div className="flex items-center gap-6 sm:gap-8 text-center bg-slate-900/80 px-6 py-3 rounded-2xl border border-slate-800">
                   <div>
                     <span className="text-lg font-bold text-slate-200">{cand.resume_match_score}%</span>
-                    <span className="text-[10px] text-slate-500 block font-medium">Resume (30%)</span>
+                    <span className="text-[10px] text-slate-500 block font-medium">Resume (40%)</span>
                   </div>
                   <div className="h-8 w-px bg-slate-800"></div>
                   <div>
-                    <span className="text-lg font-bold text-slate-200">{cand.interview_score}%</span>
-                    <span className="text-[10px] text-slate-500 block font-medium">Interview (50%)</span>
+                    <span className="text-lg font-bold text-slate-200">{cand.interview_score !== null ? `${cand.interview_score}%` : 'Pending'}</span>
+                    <span className="text-[10px] text-slate-500 block font-medium">Interview (40%)</span>
                   </div>
                   <div className="h-8 w-px bg-slate-800"></div>
                   <div>
@@ -168,8 +168,8 @@ export default function HrTopCandidates() {
                   </div>
                   <div className="h-8 w-px bg-slate-800"></div>
                   <div>
-                    <span className="text-2xl font-black text-indigo-400">{cand.overall_score}%</span>
-                    <span className="text-[10px] text-indigo-300 block font-bold uppercase tracking-wider">Composite Rank</span>
+                    <span className="text-2xl font-black text-emerald-400">{cand.overall_score}%</span>
+                    <span className="text-[10px] text-emerald-300 block font-bold uppercase tracking-wider">Overall Fit</span>
                   </div>
                 </div>
               </div>
@@ -208,15 +208,13 @@ export default function HrTopCandidates() {
                 </span>
 
                 <div className="flex items-center gap-3">
-                  {cand.report_id && (
-                    <Link
-                      to={`/hr/reports/${cand.report_id}`}
-                      className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-indigo-400" />
-                      Detailed Scorecard
-                    </Link>
-                  )}
+                  <Link
+                    to={`/hr/applications/${cand.application_id}/scorecard`}
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                    View Full Scorecard
+                  </Link>
 
                   <button
                     onClick={() => openDecisionModal(cand)}

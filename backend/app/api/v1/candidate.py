@@ -96,6 +96,18 @@ async def upload_resume(
     extracted_text = extract_text_from_pdf(str(file_path))
     extracted_skills = extract_skills_from_text(extracted_text)
 
+    # Cloud upload to Supabase private storage if configured
+    supabase_storage_path = None
+    if settings.is_supabase_enabled:
+        from app.services.supabase_service import SupabaseStorageService
+        rel_path = f"{candidate.id}/{safe_filename}"
+        supabase_storage_path = SupabaseStorageService.upload_file(
+            bucket=SupabaseStorageService.BUCKET_RESUMES,
+            path=rel_path,
+            file_bytes=file_bytes,
+            content_type=file.content_type or "application/pdf"
+        )
+
     # Automatically enrich candidate profile skills if empty
     profile = candidate.candidate_profile
     if profile:
@@ -105,7 +117,7 @@ async def upload_resume(
     resume_record = ResumeFile(
         candidate_id=candidate.id,
         file_name=file.filename,
-        file_path=str(file_path),
+        file_path=supabase_storage_path or str(file_path),
         file_size=len(file_bytes),
         mime_type=file.content_type or "application/pdf",
         parsed_text=extracted_text,
@@ -224,6 +236,14 @@ def delete_resume(
     except Exception as e:
         print(f"Notice: Could not delete physical resume file: {e}")
 
+    # Remove from Supabase Storage if enabled
+    if settings.is_supabase_enabled:
+        from app.services.supabase_service import SupabaseStorageService
+        SupabaseStorageService.delete_file(
+            bucket=SupabaseStorageService.BUCKET_RESUMES,
+            path=f"{candidate.id}/{resume.file_name}"
+        )
+
     file_name = resume.file_name
     db.delete(resume)
     db.commit()
@@ -236,6 +256,32 @@ def delete_resume(
     )
 
     return {"message": "Resume successfully deleted"}
+
+@router.get("/resumes/{resume_id}/signed-url")
+def get_resume_signed_url(
+    resume_id: str,
+    candidate: User = Depends(require_candidate),
+    db: Session = Depends(get_db)
+):
+    """Generates a secure temporary signed URL for viewing candidate resume."""
+    resume = db.query(ResumeFile).filter(
+        ResumeFile.id == resume_id,
+        ResumeFile.candidate_id == candidate.id
+    ).first()
+    if not resume:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
+
+    if settings.is_supabase_enabled:
+        from app.services.supabase_service import SupabaseStorageService
+        rel_path = f"{candidate.id}/{resume.file_name}"
+        signed_url = SupabaseStorageService.get_signed_url(
+            bucket=SupabaseStorageService.BUCKET_RESUMES,
+            path=rel_path
+        )
+        if signed_url:
+            return {"signed_url": signed_url}
+
+    return {"signed_url": f"/api/v1/candidate/resumes/{resume_id}/download"}
 
 @router.get("/privacy/export")
 def export_candidate_data(candidate: User = Depends(require_candidate), db: Session = Depends(get_db)):

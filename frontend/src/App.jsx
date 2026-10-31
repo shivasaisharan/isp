@@ -44,6 +44,7 @@ import HrJobCreate from './pages/hr/HrJobCreate';
 import HrApplicants from './pages/hr/HrApplicants';
 import HrTopCandidates from './pages/hr/HrTopCandidates';
 import HrCandidateReport from './pages/hr/HrCandidateReport';
+import HrCandidateScorecard from './pages/hr/HrCandidateScorecard';
 import HrDecisions from './pages/hr/HrDecisions';
 import HrAnalytics from './pages/hr/HrAnalytics';
 import HrOrganization from './pages/hr/HrOrganization';
@@ -94,6 +95,8 @@ export default function App() {
             <Route path="jobs/create" element={<HrJobCreate />} />
             <Route path="jobs/:jobId/applicants" element={<HrApplicants />} />
             <Route path="jobs/:jobId/top-candidates" element={<HrTopCandidates />} />
+            <Route path="applications/:applicationId/scorecard" element={<HrCandidateScorecard />} />
+            <Route path="candidates/:candidateId/scorecard" element={<HrCandidateScorecard />} />
             <Route path="reports/:reportId" element={<HrCandidateReport />} />
             <Route path="decisions" element={<HrDecisions />} />
             <Route path="analytics" element={<HrAnalytics />} />

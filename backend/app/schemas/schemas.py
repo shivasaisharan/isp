@@ -127,6 +127,11 @@ class ApplicationOut(BaseModel):
     sbert_similarity: float
     skills_match_score: float
     overall_ranking_score: float
+    interview_score: Optional[float] = None
+    interview_status: Optional[str] = None
+    report_id: Optional[str] = None
+    assessment_status: Optional[str] = None
+    scoring_formula_version: Optional[str] = "2026.2"
     applied_at: datetime
     updated_at: datetime
     job: Optional[JobSummary] = None

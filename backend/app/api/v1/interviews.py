@@ -411,7 +411,20 @@ async def transcribe_interview_audio(
             suffix = ext.lower()
 
     text = transcribe_audio_bytes(audio_bytes, file_suffix=suffix)
-    return {"transcript": text}
+
+    # Archive audio recording to Supabase Storage if enabled
+    audio_storage_path = None
+    if settings.is_supabase_enabled and len(audio_bytes) > 0:
+        from app.services.supabase_service import SupabaseStorageService
+        rel_path = f"{candidate.id}/{uuid.uuid4().hex[:8]}_{int(datetime.now().timestamp())}{suffix}"
+        audio_storage_path = SupabaseStorageService.upload_file(
+            bucket=SupabaseStorageService.BUCKET_AUDIO,
+            path=rel_path,
+            file_bytes=audio_bytes,
+            content_type="audio/webm"
+        )
+
+    return {"transcript": text, "audio_storage_path": audio_storage_path}
 
 # =========================================================================
 # SECURE FULL-SCREEN INTERVIEW MONITORING & THREE-STRIKE VIOLATION APIS
