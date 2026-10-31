@@ -48,12 +48,14 @@ import HrCandidateScorecard from './pages/hr/HrCandidateScorecard';
 import HrDecisions from './pages/hr/HrDecisions';
 import HrAnalytics from './pages/hr/HrAnalytics';
 import HrOrganization from './pages/hr/HrOrganization';
+import ErrorBoundary from './components/ErrorBoundary';
 
 export default function App() {
   return (
-    <AuthProvider>
-      <NotificationProvider>
-        <Routes>
+    <ErrorBoundary>
+      <AuthProvider>
+        <NotificationProvider>
+          <Routes>
           {/* Public Marketing Website */}
           <Route path="/" element={<LandingPage />} />
           <Route path="/features" element={<FeaturesPage />} />
@@ -108,5 +110,6 @@ export default function App() {
         </Routes>
       </NotificationProvider>
     </AuthProvider>
+  </ErrorBoundary>
   );
 }

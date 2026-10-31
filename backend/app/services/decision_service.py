@@ -164,29 +164,30 @@ def record_hr_decision_workflow(
 
     prev_status = app.status
     is_revision = False
+    previous_decision = None
 
     if norm_decision == "ACCEPTED":
         if app.status in ["accepted", "selected"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Candidate application has already been accepted."
+                detail="Candidate application has already been accepted. No status change needed."
             )
         if app.status == "rejected":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot accept an already rejected candidate. Reconsideration of rejected applications requires administrative review."
-            )
+            # Authorized Decision Reversal: Rejected candidate reconsidered and accepted
+            is_revision = True
+            previous_decision = "REJECTED"
         target_status = "selected" if raw_decision.lower() == "selected" else "accepted"
         legacy_decision_val = "selected" if raw_decision.lower() == "selected" else "accepted"
     else:
         if app.status == "rejected":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Candidate application has already been rejected."
+                detail="Candidate application has already been rejected. No status change needed."
             )
         if app.status in ["accepted", "selected"]:
             # Authorized Decision Reversal: Accepted candidate rejected following verification
             is_revision = True
+            previous_decision = "ACCEPTED"
         target_status = "rejected"
         legacy_decision_val = "rejected"
 
@@ -238,11 +239,11 @@ def record_hr_decision_workflow(
     db.add(history_record)
 
     # 4. Record ApplicationStatusHistory
-    status_note = (
-        f"Hiring decision revised: REJECTED following additional verification. Notes: {cleaned_notes}"
-        if is_revision
-        else f"Final human hiring decision: {norm_decision}. Notes: {cleaned_notes}"
-    )
+    if is_revision:
+        status_note = f"Hiring decision revised: {norm_decision} following additional review. Notes: {cleaned_notes}"
+    else:
+        status_note = f"Final human hiring decision: {norm_decision}. Notes: {cleaned_notes}"
+
     status_history = ApplicationStatusHistory(
         application_id=app.id,
         previous_status=prev_status,
@@ -255,7 +256,10 @@ def record_hr_decision_workflow(
     # 5. Candidate Notification (without exposing confidential internal HR notes)
     if norm_decision == "ACCEPTED":
         notif_title = f"Application Accepted: {app.job.title}"
-        notif_msg = f"Congratulations! Your application for {app.job.title} has been officially accepted by our hiring team."
+        if is_revision:
+            notif_msg = f"Good news! Following reconsidered review, your application for {app.job.title} has been officially accepted by our hiring team."
+        else:
+            notif_msg = f"Congratulations! Your application for {app.job.title} has been officially accepted by our hiring team."
     elif is_revision:
         notif_title = f"Application Update: {app.job.title}"
         notif_msg = f"Your application status for {app.job.title} has been updated following an additional review."
@@ -297,7 +301,7 @@ def record_hr_decision_workflow(
             "previous_status": prev_status,
             "new_status": target_status,
             "is_revision": is_revision,
-            "previous_decision": "ACCEPTED" if is_revision else None,
+            "previous_decision": previous_decision,
             "revision_reason": cleaned_notes if is_revision else None
         }
     )
@@ -306,16 +310,21 @@ def record_hr_decision_workflow(
     from app.services.activity_service import record_recruitment_activity
     comp_name = app.job.organization.name if (app.job and app.job.organization) else "Company"
     if norm_decision == "ACCEPTED":
+        desc = (
+            f"Your application for {app.job.title} at {comp_name} was accepted by the recruitment team following reconsideration."
+            if is_revision else
+            f"Your application for {app.job.title} at {comp_name} was accepted by the recruitment team."
+        )
         record_recruitment_activity(
             db=db,
             candidate_id=app.candidate_id,
             activity_type="APPLICATION_ACCEPTED",
             activity_title="Application Accepted",
-            activity_description=f"Your application for {app.job.title} at {comp_name} was accepted by the recruitment team.",
+            activity_description=desc,
             application_id=app.id,
             job_id=app.job_id,
             company_id=app.job.organization_id,
-            metadata_json={"company_name": comp_name, "job_title": app.job.title, "status": "ACCEPTED", "application_ref": f"APP-{app.id[:8].upper()}"}
+            metadata_json={"company_name": comp_name, "job_title": app.job.title, "status": "ACCEPTED", "is_revision": is_revision, "application_ref": f"APP-{app.id[:8].upper()}"}
         )
     elif is_revision:
         record_recruitment_activity(
