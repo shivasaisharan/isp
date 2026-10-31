@@ -181,38 +181,83 @@ def test_synchronized_hiring_decisions_full_suite(client):
     assert conflict_res.status_code == 400
     assert "Cannot accept an already rejected candidate" in conflict_res.json()["detail"]
 
-    conflict_res2 = client.post(f"/api/v1/hr/applications/{cand_a['application_id']}/decision", json={
+    # -------------------------------------------------------------------------
+    # TEST 9B: Reverse Accepted Candidate A to Rejected with Verification Findings
+    # -------------------------------------------------------------------------
+    reversal_res = client.post(f"/api/v1/hr/applications/{cand_a['application_id']}/decision", json={
         "decision": "REJECTED",
-        "decision_notes": "Attempting to reverse accepted status illegally."
+        "decision_notes": "Further verification findings: background credentials check revealed discrepancies."
     }, headers=hr_headers)
-    assert conflict_res2.status_code == 400
-    assert "Cannot reject an already accepted candidate" in conflict_res2.json()["detail"]
+    assert reversal_res.status_code == 200
+    assert reversal_res.json()["status"] == "rejected"
+    assert reversal_res.json()["is_revision"] is True
+    assert reversal_res.json()["previous_decision"] == "ACCEPTED"
+
+    # Verify Cand A is now rejected across Top-5 and Applicant Pool
+    top5_after_rev = client.get(f"/api/v1/rankings/job/{job_id}/top-candidates", headers=hr_headers).json()
+    match_a_top_rev = next((c for c in top5_after_rev if c["application_id"] == cand_a["application_id"]), None)
+    assert match_a_top_rev is not None
+    assert match_a_top_rev["status"] == "rejected"
+
+    apps_after_rev = client.get(f"/api/v1/applications/job/{job_id}/applicants", headers=hr_headers).json()
+    match_a_app_rev = next((a for a in apps_after_rev if a["id"] == cand_a["application_id"]), None)
+    assert match_a_app_rev is not None
+    assert match_a_app_rev["status"] == "rejected"
+
+    # Now duplicate rejection of Candidate A must be blocked
+    dup_reject_res = client.post(f"/api/v1/hr/applications/{cand_a['application_id']}/decision", json={
+        "decision": "REJECTED",
+        "decision_notes": "Attempting duplicate rejection."
+    }, headers=hr_headers)
+    assert dup_reject_res.status_code == 400
+    assert "already been rejected" in dup_reject_res.json()["detail"]
+
+    # Now accepting Candidate A (who is now rejected) must also be blocked
+    accept_blocked_res = client.post(f"/api/v1/hr/applications/{cand_a['application_id']}/decision", json={
+        "decision": "ACCEPTED",
+        "decision_notes": "Attempting to accept after rejection."
+    }, headers=hr_headers)
+    assert accept_blocked_res.status_code == 400
+    assert "Cannot accept an already rejected candidate" in accept_blocked_res.json()["detail"]
 
     # -------------------------------------------------------------------------
-    # TEST 10: Check Confirmed Hiring Decisions History
+    # TEST 10: Check Confirmed Hiring Decisions History (Preserves Both Decisions for Reversal)
     # -------------------------------------------------------------------------
     history_res = client.get("/api/v1/hr/decisions", headers=hr_headers)
     assert history_res.status_code == 200
     history_items = history_res.json()["items"]
     
-    # Verify candidate A exists once in history
+    # Verify candidate A retains BOTH the initial ACCEPTED and revised REJECTED records
     items_a = [h for h in history_items if h["application_id"] == cand_a["application_id"]]
-    assert len(items_a) == 1
-    assert items_a[0]["decision"] == "ACCEPTED"
+    assert len(items_a) == 2
+    decisions_a = {h["decision"] for h in items_a}
+    assert "ACCEPTED" in decisions_a
+    assert "REJECTED" in decisions_a
 
     # Verify candidate B exists once in history
     items_b = [h for h in history_items if h["application_id"] == cand_b["application_id"]]
     assert len(items_b) == 1
     assert items_b[0]["decision"] == "REJECTED"
 
+    # Verify candidate C exists once in history
+    items_c = [h for h in history_items if h["application_id"] == cand_c["application_id"]]
+    assert len(items_c) == 1
+    assert items_c[0]["decision"] == "ACCEPTED"
+
     # -------------------------------------------------------------------------
-    # TEST 11: Check Candidate Portal (Status and Recruitment Activity)
+    # TEST 11: Check Candidate Portal (Status and Recruitment Activity with Revision)
     # -------------------------------------------------------------------------
     cand_a_apps = client.get("/api/v1/applications/candidate/all", headers=cand_a["headers"])
     assert cand_a_apps.status_code == 200
     my_app_a = next((a for a in cand_a_apps.json() if a["id"] == cand_a["application_id"]), None)
     assert my_app_a is not None
-    assert my_app_a["status"] == "accepted"
+    assert my_app_a["status"] == "rejected"
+
+    cand_c_apps = client.get("/api/v1/applications/candidate/all", headers=cand_c["headers"])
+    assert cand_c_apps.status_code == 200
+    my_app_c = next((a for a in cand_c_apps.json() if a["id"] == cand_c["application_id"]), None)
+    assert my_app_c is not None
+    assert my_app_c["status"] == "accepted"
 
     activities_res = client.get("/api/v1/candidate/activities", headers=cand_a["headers"])
     assert activities_res.status_code == 200
@@ -221,10 +266,15 @@ def test_synchronized_hiring_decisions_full_suite(client):
     assert accept_act is not None
     assert "Application Accepted" in accept_act["activity_title"]
 
+    reject_act = next((act for act in acts if act["activity_type"] == "APPLICATION_REJECTED"), None)
+    assert reject_act is not None
+    assert "updated following an additional HR review" in reject_act["activity_description"]
+    assert reject_act["metadata_json"]["is_revision"] is True
+
     # -------------------------------------------------------------------------
     # TEST 12: Independent Decisions per Application
     # -------------------------------------------------------------------------
-    # Candidate A applies for a second job opening
+    # Candidate C (who is currently ACCEPTED on Job 1) applies for a second job opening
     new_job_2 = client.post("/api/v1/jobs", json={
         "title": f"Secondary Role {uuid.uuid4().hex[:6]}",
         "department": "Infrastructure",
@@ -238,11 +288,11 @@ def test_synchronized_hiring_decisions_full_suite(client):
     assert new_job_2.status_code == 201
     job_2_id = new_job_2.json()["id"]
 
-    app_2_res = client.post("/api/v1/applications", json={"job_id": job_2_id}, headers=cand_a["headers"])
+    app_2_res = client.post("/api/v1/applications", json={"job_id": job_2_id}, headers=cand_c["headers"])
     assert app_2_res.status_code == 201
     app_2_id = app_2_res.json()["id"]
 
-    # Reject Candidate A on second job
+    # Reject Candidate C on second job
     dec_job2 = client.post(f"/api/v1/hr/applications/{app_2_id}/decision", json={
         "decision": "REJECTED",
         "decision_notes": "Not a fit for this secondary position."
@@ -250,9 +300,9 @@ def test_synchronized_hiring_decisions_full_suite(client):
     assert dec_job2.status_code == 200
 
     # Primary application for job 1 remains ACCEPTED!
-    app_1_check = client.get(f"/api/v1/applications/{cand_a['application_id']}", headers=cand_a["headers"]).json()
+    app_1_check = client.get(f"/api/v1/applications/{cand_c['application_id']}", headers=cand_c["headers"]).json()
     assert app_1_check["status"] == "accepted"
 
     # Secondary application for job 2 is REJECTED
-    app_2_check = client.get(f"/api/v1/applications/{app_2_id}", headers=cand_a["headers"]).json()
+    app_2_check = client.get(f"/api/v1/applications/{app_2_id}", headers=cand_c["headers"]).json()
     assert app_2_check["status"] == "rejected"

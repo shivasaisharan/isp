@@ -268,6 +268,8 @@ class ApplicationDecisionResponse(BaseModel):
     reviewer_id: Optional[str] = None
     decision_notes: str
     decided_at: datetime
+    is_revision: Optional[bool] = False
+    previous_decision: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class HiringDecisionCreate(BaseModel):

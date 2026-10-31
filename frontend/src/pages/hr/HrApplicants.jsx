@@ -48,6 +48,10 @@ export default function HrApplicants() {
       alert("This candidate has already been accepted.");
       return;
     }
+    if (app.status === 'rejected') {
+      alert("Cannot accept an already rejected candidate. Reconsideration requires administrative review.");
+      return;
+    }
     setActiveApp(app);
     setModalType('accept');
     setNotes(`Candidate demonstrates strong alignment with role competencies (${app.overall_ranking_score}% overall fit). Recommended for formal offer.`);
@@ -62,7 +66,11 @@ export default function HrApplicants() {
     }
     setActiveApp(app);
     setModalType('reject');
-    setNotes(`After thorough review of candidate profile and evaluation metrics (${app.overall_ranking_score}% overall fit), team decided to proceed with other applicants.`);
+    if (app.status === 'accepted' || app.status === 'selected') {
+      setNotes(`Decision revised following additional HR verification. Identified suitability/compliance concerns.`);
+    } else {
+      setNotes(`After thorough review of candidate profile and evaluation metrics (${app.overall_ranking_score}% overall fit), team decided to proceed with other applicants.`);
+    }
     setFeedbackMsg({ type: '', text: '' });
   };
 
@@ -414,7 +422,7 @@ export default function HrApplicants() {
                       {renderStatusBadge(app.status)}
                     </td>
 
-                    {/* ACTIONS: VIEW SCORE + EXACTLY TWO HIRING DECISIONS (ACCEPT | REJECT) */}
+                    {/* ACTIONS: VIEW SCORE + DYNAMIC DECISION CONTROLS */}
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {/* VIEW SCORE LINK */}
@@ -427,35 +435,45 @@ export default function HrApplicants() {
                           <span className="hidden sm:inline">Score</span>
                         </Link>
 
-                        {/* ACCEPT BUTTON (GREEN) */}
-                        <button
-                          onClick={() => handleOpenAccept(app)}
-                          disabled={app.status === 'accepted' || app.status === 'selected'}
-                          title={app.status === 'accepted' || app.status === 'selected' ? 'Candidate already accepted' : 'Accept candidate for position'}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-sm ${
-                            app.status === 'accepted' || app.status === 'selected'
-                              ? 'bg-emerald-950/50 text-emerald-600 border border-emerald-900/40 cursor-not-allowed opacity-60'
-                              : 'bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95'
-                          }`}
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Accept</span>
-                        </button>
+                        {/* CASE 1: CANDIDATE IS ACCEPTED -> Reject button remains available for verification revision */}
+                        {(app.status === 'accepted' || app.status === 'selected') && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReject(app)}
+                            title="Reject candidate after further verification"
+                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Reject</span>
+                          </button>
+                        )}
 
-                        {/* REJECT BUTTON (RED) */}
-                        <button
-                          onClick={() => handleOpenReject(app)}
-                          disabled={app.status === 'rejected'}
-                          title={app.status === 'rejected' ? 'Candidate already rejected' : 'Reject candidate application'}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-sm ${
-                            app.status === 'rejected'
-                              ? 'bg-rose-950/50 text-rose-600 border border-rose-900/40 cursor-not-allowed opacity-60'
-                              : 'bg-rose-600 hover:bg-rose-500 text-white active:scale-95'
-                          }`}
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>Reject</span>
-                        </button>
+                        {/* CASE 2: CANDIDATE HAS NO FINAL DECISION -> Show both Accept and Reject */}
+                        {app.status !== 'accepted' && app.status !== 'selected' && app.status !== 'rejected' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAccept(app)}
+                              title="Accept candidate for position"
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Accept</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReject(app)}
+                              title="Reject candidate application"
+                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Reject</span>
+                            </button>
+                          </>
+                        )}
+
+                        {/* CASE 3: CANDIDATE IS REJECTED -> Only Score button shown */}
                       </div>
                     </td>
                   </tr>
@@ -494,6 +512,17 @@ export default function HrApplicants() {
               </div>
             </div>
 
+            {/* Reversal Warning if candidate was previously accepted */}
+            {modalType === 'reject' && (activeApp.status === 'accepted' || activeApp.status === 'selected') && (
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-300 text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <div>
+                  <span className="font-bold text-amber-200 block">Decision Reversal Warning</span>
+                  <span>This candidate was previously accepted. Rejecting this application will revise the existing hiring decision and update the candidate's application status to <strong>REJECTED</strong>.</span>
+                </div>
+              </div>
+            )}
+
             {/* Candidate & Scores Summary Card */}
             <div className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 space-y-3">
               <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-800">
@@ -502,8 +531,16 @@ export default function HrApplicants() {
                   <span className="text-white font-bold">{activeApp.candidate_name}</span>
                 </div>
                 <div className="text-right">
-                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Candidate ID</span>
-                  <span className="text-indigo-300 font-mono text-[11px] font-semibold">{activeApp.anonymized_alias || activeApp.candidate_id?.slice(0, 8)}</span>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Current Status</span>
+                  <span className={`text-[11px] font-bold uppercase ${
+                    activeApp.status === 'accepted' || activeApp.status === 'selected'
+                      ? 'text-emerald-400'
+                      : activeApp.status === 'rejected'
+                      ? 'text-rose-400'
+                      : 'text-slate-300'
+                  }`}>
+                    {activeApp.status === 'selected' ? 'ACCEPTED' : activeApp.status?.replace('_', ' ')}
+                  </span>
                 </div>
               </div>
 
@@ -526,6 +563,8 @@ export default function HrApplicants() {
             <p className="text-xs text-slate-300 leading-relaxed">
               {modalType === 'accept'
                 ? `Confirming this decision will update the application status to ACCEPTED across all HR dashboards, record an immutable audit trail, and notify the candidate.`
+                : activeApp.status === 'accepted' || activeApp.status === 'selected'
+                ? `Confirming this decision will revise the candidate's previous acceptance to REJECTED based on your verification findings.`
                 : `Confirming this decision will update the application status to REJECTED across all HR dashboards, record your justification in the compliance audit trail, and notify the candidate.`
               }
             </p>
@@ -543,7 +582,7 @@ export default function HrApplicants() {
             <form onSubmit={handleConfirmDecision} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
-                  {modalType === 'accept' ? 'Decision Notes' : 'Rejection Reason'} <span className={modalType === 'accept' ? 'text-emerald-400' : 'text-rose-400'}>*</span>
+                  {modalType === 'accept' ? 'HR Decision Notes' : 'Reason for Rejection / Verification Findings'} <span className={modalType === 'accept' ? 'text-emerald-400' : 'text-rose-400'}>*</span>
                 </label>
                 <textarea
                   rows={4}
@@ -552,6 +591,8 @@ export default function HrApplicants() {
                   placeholder={
                     modalType === 'accept'
                       ? "Enter official hiring rationale and offer considerations..."
+                      : activeApp.status === 'accepted' || activeApp.status === 'selected'
+                      ? "Enter specific verification findings and objective reasons for revising decision to rejected..."
                       : "Enter objective justification for not advancing this candidate..."
                   }
                   className={`w-full bg-slate-900 border rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none ${

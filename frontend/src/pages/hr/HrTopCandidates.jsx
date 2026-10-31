@@ -44,7 +44,7 @@ export default function HrTopCandidates() {
       return;
     }
     if (cand.status === 'rejected') {
-      alert("Cannot accept an already rejected candidate.");
+      alert("Cannot accept an already rejected candidate. Reconsideration requires administrative review.");
       return;
     }
     setActiveCandidate(cand);
@@ -59,13 +59,13 @@ export default function HrTopCandidates() {
       alert("This candidate has already been rejected.");
       return;
     }
-    if (cand.status === 'accepted' || cand.status === 'selected') {
-      alert("Cannot reject an already accepted candidate.");
-      return;
-    }
     setActiveCandidate(cand);
     setModalType('reject');
-    setNotes(`After thorough review of candidate profile and evaluation metrics (${cand.overall_score}% overall fit), team decided to proceed with other applicants.`);
+    if (cand.status === 'accepted' || cand.status === 'selected') {
+      setNotes(`Decision revised following additional HR verification findings. Concerns identified regarding role suitability/compliance.`);
+    } else {
+      setNotes(`After thorough review of candidate profile and evaluation metrics (${cand.overall_score}% overall fit), team decided to proceed with other applicants.`);
+    }
     setFeedbackMsg({ type: '', text: '' });
   };
 
@@ -265,16 +265,27 @@ export default function HrTopCandidates() {
                     View Full Scorecard
                   </Link>
 
-                  {/* DYNAMIC DECISION CONTROLS (Rule: ACCEPTED -> SELECTED badge, REJECTED -> REJECTED badge, else Accept + Reject buttons) */}
+                  {/* DYNAMIC DECISION CONTROLS (Rule: ACCEPTED -> SELECTED badge + Reject button; REJECTED -> NOT SELECTED badge; else Accept + Reject buttons) */}
                   {cand.status === 'accepted' || cand.status === 'selected' ? (
-                    <span className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 shadow-sm uppercase tracking-wider">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      SELECTED
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 shadow-sm uppercase tracking-wider">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        SELECTED
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenReject(cand)}
+                        title="Reject candidate after further verification"
+                        className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Reject</span>
+                      </button>
+                    </div>
                   ) : cand.status === 'rejected' ? (
                     <span className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-rose-500/10 text-rose-400 border border-rose-500/30 flex items-center gap-1.5 shadow-sm uppercase tracking-wider">
                       <XCircle className="w-4 h-4 text-rose-400" />
-                      REJECTED
+                      NOT SELECTED
                     </span>
                   ) : (
                     <div className="flex items-center gap-2">
@@ -332,6 +343,17 @@ export default function HrTopCandidates() {
               </div>
             </div>
 
+            {/* Reversal Warning if candidate was previously accepted */}
+            {modalType === 'reject' && (activeCandidate.status === 'accepted' || activeCandidate.status === 'selected') && (
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-300 text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <div>
+                  <span className="font-bold text-amber-200 block">Decision Reversal Warning</span>
+                  <span>This candidate was previously accepted. Rejecting this application will revise the existing hiring decision and update the candidate's application status to <strong>REJECTED</strong>.</span>
+                </div>
+              </div>
+            )}
+
             {/* Candidate & Scores Summary Card */}
             <div className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 space-y-3">
               <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-800">
@@ -340,8 +362,16 @@ export default function HrTopCandidates() {
                   <span className="text-white font-bold">{activeCandidate.candidate_name}</span>
                 </div>
                 <div className="text-right">
-                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Candidate ID</span>
-                  <span className="text-indigo-300 font-mono text-[11px] font-semibold">{activeCandidate.anonymized_alias || activeCandidate.candidate_id?.slice(0, 8)}</span>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Current Status</span>
+                  <span className={`text-[11px] font-bold uppercase ${
+                    activeCandidate.status === 'accepted' || activeCandidate.status === 'selected'
+                      ? 'text-emerald-400'
+                      : activeCandidate.status === 'rejected'
+                      ? 'text-rose-400'
+                      : 'text-slate-300'
+                  }`}>
+                    {activeCandidate.status === 'selected' ? 'ACCEPTED' : activeCandidate.status?.replace('_', ' ')}
+                  </span>
                 </div>
               </div>
 
@@ -364,6 +394,8 @@ export default function HrTopCandidates() {
             <p className="text-xs text-slate-300 leading-relaxed">
               {modalType === 'accept'
                 ? `Confirming this decision will update the application status to ACCEPTED across all HR dashboards, record an immutable audit trail, and notify the candidate.`
+                : activeCandidate.status === 'accepted' || activeCandidate.status === 'selected'
+                ? `Confirming this decision will revise the candidate's previous acceptance to REJECTED based on your verification findings.`
                 : `Confirming this decision will update the application status to REJECTED across all HR dashboards, record your justification in the compliance audit trail, and notify the candidate.`
               }
             </p>
@@ -381,7 +413,7 @@ export default function HrTopCandidates() {
             <form onSubmit={handleConfirmDecision} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
-                  {modalType === 'accept' ? 'Decision Notes' : 'Rejection Reason'} <span className={modalType === 'accept' ? 'text-emerald-400' : 'text-rose-400'}>*</span>
+                  {modalType === 'accept' ? 'HR Decision Notes' : 'Reason for Rejection / Verification Findings'} <span className={modalType === 'accept' ? 'text-emerald-400' : 'text-rose-400'}>*</span>
                 </label>
                 <textarea
                   rows={4}
@@ -390,6 +422,8 @@ export default function HrTopCandidates() {
                   placeholder={
                     modalType === 'accept'
                       ? "Enter official hiring rationale and offer considerations..."
+                      : activeCandidate.status === 'accepted' || activeCandidate.status === 'selected'
+                      ? "Enter specific verification findings and objective reasons for revising decision to rejected..."
                       : "Enter objective justification for not advancing this candidate..."
                   }
                   className={`w-full bg-slate-900 border rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none ${

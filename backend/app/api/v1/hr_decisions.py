@@ -109,8 +109,9 @@ def submit_hr_application_decision_direct(
         raw_decision=payload.decision,
         notes=notes_val
     )
+    is_rev = history_rec.previous_status in ["accepted", "selected"] and history_rec.decision == "REJECTED"
     return {
-        "message": f"Candidate successfully marked as {history_rec.decision}!",
+        "message": "Hiring decision successfully revised to REJECTED following verification." if is_rev else f"Candidate successfully marked as {history_rec.decision}!",
         "decision": history_rec.decision,
         "status": history_rec.new_status,
         "application_id": history_rec.application_id,
@@ -118,7 +119,9 @@ def submit_hr_application_decision_direct(
         "job_id": history_rec.job_id,
         "reviewer_id": hr_user.id,
         "decision_notes": history_rec.decision_notes,
-        "decided_at": history_rec.decided_at
+        "decided_at": history_rec.decided_at,
+        "is_revision": is_rev,
+        "previous_decision": "ACCEPTED" if is_rev else None
     }
 
 @hr_base_router.get("/reviewers")
