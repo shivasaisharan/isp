@@ -353,3 +353,53 @@ class NotificationOut(BaseModel):
     link: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+class ResolvedAuditEventOut(BaseModel):
+    id: str
+    event_reference: str
+    action: str
+    action_display: str
+    category: str
+    category_display: str
+    actor_id: Optional[str] = None
+    actor_role: str
+    actor_name: str
+    actor_designation: str
+    actor_reference: Optional[str] = None
+    candidate_id: Optional[str] = None
+    candidate_name: Optional[str] = None
+    candidate_reference: Optional[str] = None
+    candidate_email: Optional[str] = None
+    job_id: Optional[str] = None
+    job_title: Optional[str] = None
+    job_reference: Optional[str] = None
+    company_name: Optional[str] = None
+    department: Optional[str] = None
+    previous_status: Optional[str] = None
+    new_status: Optional[str] = None
+    decision_notes: Optional[str] = None
+    application_id: Optional[str] = None
+    application_reference: Optional[str] = None
+    assessment_reference: Optional[str] = None
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    details_json: Dict[str, Any] = {}
+    created_at: datetime
+    is_hiring_decision: bool = False
+    model_config = ConfigDict(from_attributes=True)
+
+class AuditTrailSummaryOut(BaseModel):
+    total_audit_events: int
+    hiring_decisions: int
+    candidate_applications: int
+    interview_events: int
+    resume_events: int
+    security_events: int
+    job_management_events: int
+
+class AuditTrailPageOut(BaseModel):
+    items: List[ResolvedAuditEventOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

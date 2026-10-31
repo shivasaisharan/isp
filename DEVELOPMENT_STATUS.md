@@ -185,6 +185,39 @@ The Candidate Portal's Activity History previously displayed repetitive authenti
 - **Supabase Migration:** Created `supabase/migrations/20261031_candidate_recruitment_activities.sql` with table definitions and Row Level Security (RLS) policies ensuring candidates only access their own recruitment milestones.
 - **Automated Verification:** Added `backend/tests/test_candidate_activities.py`. All 19 backend tests across all test suites pass with 100% success; frontend production build passes cleanly.
 
+---
+
+## 8. Phase 15: Professional Immutable Responsible AI Compliance Audit Trail Redesign
+
+### A. Problem Statement
+The HR Portal's **Immutable Responsible AI Compliance Audit Trail** (`HrAnalytics.jsx`) previously displayed raw database UUIDs (e.g. `candidate_id: 5d8f191b...`, `job_id: 79dc53a0...`), unformatted JSON blobs, and technical event codes. This prevented recruiters and compliance officers from understanding who performed the action, which candidate and job were involved, and what decision explanation was recorded.
+
+### B. Architecture & Resolution
+- **Dynamic Relationship Resolution Service (`app.services.audit_service`):**
+  - Resolves `candidate_id` → Candidate full name, reference (`CAND-XXXXXX`), and email.
+  - Resolves `job_id` → Job position/title, department, reference (`JOB-XXXXXX`), and Organization name.
+  - Resolves `actor_id` → HR recruiter name, employee reference (`HR-XXXXXX`), and designation (`Recruiter Admin`, `Senior Recruiter`, `HR Recruiter`) derived from `OrganizationMembership`.
+  - Resolves status transitions (`previous_status` → `new_status`) and decision rationale notes.
+  - Safe fallbacks for deleted or general organizational events ("General Organization Action", "Smart Recruit Enterprise").
+- **Centralized Event Type Mapping:** Maps database actions to human-readable labels (`candidate_accepted` → "Candidate Accepted", `FINAL_HIRING_DECISION` → "Final Hiring Decision Recorded", `APPLICATION_STATUS_UPDATED` → "Application Status Updated", `INTERVIEW_VIOLATION` → "Interview Security Event Recorded", etc.) across 6 distinct categories.
+- **Strict Immutability Enforced:** Zero historical records modified or deleted; display data is resolved dynamically at query time while preserving the original `details_json` and timestamps.
+- **REST APIs:**
+  - `GET /api/v1/hr/audit-trail`: Paginated, multi-filter endpoint (`category`, `event_type`, `search`, `reviewer_id`, `candidate_id`, `job_id`, `start_date`, `end_date`, `sort_order`, `page`, `page_size`).
+  - `GET /api/v1/hr/audit-trail/summary`: Real-time audit metrics across categories (Total Events, Hiring Decisions, Applications, Interviews, Resumes, Security).
+  - `GET /api/v1/hr/audit-trail/export`: Official compliance CSV download with human-readable headers and resolved candidate/job/performer details.
+  - Updated legacy `GET /api/v1/analytics/audit-logs` for backward compatibility.
+- **Redesigned Audit Interface (`HrAnalytics.jsx`):**
+  - 6 Top summary cards with distinct accent colors and icons.
+  - Category tabs: All Events, Hiring Decisions, Candidate Applications, Interview Events, Resume Events, Security Events, Job Management.
+  - Search input, dynamic HR Reviewer dropdown, date range pickers, sort order selector, and reset button.
+  - Enterprise dark navy & slate audit cards with action icon, title, category badge, date/time + relative time, candidate block, job/company block, performer block, status transition badges, and decision quote block.
+  - Expandable technical audit inspector with raw JSON viewer and copy-to-clipboard functionality.
+  - "Inspect Record" full modal dialog displaying verified audit details, transition timeline, and immutable audit certificate hash.
+  - CSV export capability and responsive pagination bar.
+- **Supabase Migration:** Created `supabase/migrations/20261031_immutable_compliance_audit_trail.sql` with table definitions, performance indexes, and strict Row Level Security (RLS) rules blocking updates and deletes.
+- **Automated Verification:** Added `backend/tests/test_compliance_audit_trail.py` (5 tests covering resolution, summary metrics, composite filtering, CSV export, and organization isolation). All 24 backend tests pass; frontend build passes cleanly.
+
+
 
 
 

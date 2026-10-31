@@ -72,3 +72,4 @@ CREATE POLICY "No deletes permitted on recruitment activity logs"
 ON public.candidate_recruitment_activities
 FOR DELETE
 USING (false);
+

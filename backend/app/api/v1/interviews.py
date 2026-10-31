@@ -15,7 +15,7 @@ from app.schemas.schemas import (
 from app.services.ai_service import (
     generate_interview_questions, evaluate_single_answer, generate_final_interview_report
 )
-from app.services.notification_service import create_notification, record_user_activity
+from app.services.notification_service import create_notification, record_user_activity, record_audit_log
 from app.services.stt_service import transcribe_audio_bytes
 from app.core.rubric import calculate_composite_rank_score
 
@@ -595,6 +595,29 @@ def record_interview_violation(
                 notification_type="interview",
                 link=f"/candidate/applications/{app.id}"
             )
+
+            if app and app.job:
+                record_audit_log(
+                    db=db,
+                    organization_id=app.job.organization_id,
+                    actor_id=candidate.id,
+                    actor_role="candidate",
+                    action="INTERVIEW_VIOLATION",
+                    resource_type="interview_session",
+                    resource_id=session.id,
+                    details_json={
+                        "candidate_id": candidate.id,
+                        "candidate_name": candidate.full_name,
+                        "job_id": app.job_id,
+                        "job_title": app.job.title,
+                        "company_name": app.job.organization.name if app.job.organization else "Company",
+                        "violation_type": violation_in.violation_type,
+                        "violation_number": new_violation_num,
+                        "notes": "Interview terminated after 3 environment security violations. Flagged for HR review.",
+                        "previous_status": "in_progress",
+                        "new_status": "hr_review"
+                    }
+                )
 
     db.commit()
     db.refresh(session)

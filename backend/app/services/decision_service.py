@@ -255,6 +255,10 @@ def record_hr_decision_workflow(
     )
 
     # 6. Audit Log
+    cand_disp_name = app.candidate.full_name if (app.candidate and app.candidate.full_name) else "Candidate"
+    job_disp_title = app.job.title if (app.job and app.job.title) else "Position"
+    comp_disp_name = app.job.organization.name if (app.job and app.job.organization) else "Company"
+
     record_audit_log(
         db=db,
         actor_id=hr_user.id,
@@ -265,7 +269,10 @@ def record_hr_decision_workflow(
         resource_id=app.id,
         details_json={
             "candidate_id": app.candidate_id,
+            "candidate_name": cand_disp_name,
             "job_id": app.job_id,
+            "job_title": job_disp_title,
+            "company_name": comp_disp_name,
             "decision": norm_decision,
             "notes": cleaned_notes,
             "previous_status": prev_status,

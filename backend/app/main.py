@@ -23,7 +23,7 @@ from app.api.v1.hr_decisions import router as hr_decisions_router, hr_base_route
 from app.api.v1.activity import router as activity_router, candidate_activities_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.organization import router as organization_router
-from app.api.v1.analytics import router as analytics_router
+from app.api.v1.analytics import router as analytics_router, audit_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -80,6 +80,7 @@ app.include_router(candidate_activities_router, prefix=prefix)
 app.include_router(notifications_router, prefix=prefix)
 app.include_router(organization_router, prefix=prefix)
 app.include_router(analytics_router, prefix=prefix)
+app.include_router(audit_router, prefix=prefix)
 
 @app.get("/")
 def root():

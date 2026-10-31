@@ -410,3 +410,4 @@ class AuditEvent(Base):
     created_at = Column(DateTime, default=utc_now, nullable=False, index=True)
 
     organization = relationship("Organization", back_populates="audit_events")
+    actor = relationship("User", foreign_keys=[actor_id])

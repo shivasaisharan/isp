@@ -567,7 +567,16 @@ def update_application_status(
         action="APPLICATION_STATUS_UPDATED",
         resource_type="application",
         resource_id=app.id,
-        details_json={"prev_status": prev_status, "new_status": status_update.status}
+        details_json={
+            "candidate_id": app.candidate_id,
+            "candidate_name": app.candidate.full_name if (app.candidate and app.candidate.full_name) else "Candidate",
+            "job_id": app.job_id,
+            "job_title": app.job.title if app.job else "Position",
+            "company_name": membership.organization.name if membership.organization else "Company",
+            "prev_status": prev_status,
+            "new_status": status_update.status,
+            "notes": status_update.note or f"Application status changed to {status_update.status.replace('_', ' ').title()}."
+        }
     )
 
     out = ApplicationOut.model_validate(app)
