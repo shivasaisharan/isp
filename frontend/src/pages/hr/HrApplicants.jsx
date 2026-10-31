@@ -5,6 +5,7 @@ import {
   CheckCircle2, XCircle, AlertOctagon, Clock, ShieldAlert, Sparkles, FileText, Check, X
 } from 'lucide-react';
 import api from '../../services/api';
+import HrResumeViewer from '../../components/HrResumeViewer';
 
 export default function HrApplicants() {
   const { jobId } = useParams();
@@ -15,6 +16,9 @@ export default function HrApplicants() {
   const [pipelineFilter, setPipelineFilter] = useState('ALL');
   const [sortBy, setSortBy] = useState('fit_desc');
   const [loading, setLoading] = useState(true);
+
+  // Resume Viewer State
+  const [resumeApp, setResumeApp] = useState(null);
 
   // Decision Modal States
   const [modalType, setModalType] = useState(null); // 'accept' | 'reject' | null
@@ -422,10 +426,33 @@ export default function HrApplicants() {
                       {renderStatusBadge(app.status)}
                     </td>
 
-                    {/* ACTIONS: VIEW SCORE + DYNAMIC DECISION CONTROLS */}
+                    {/* ACTIONS: VIEW RESUME + VIEW SCORE + DYNAMIC DECISION CONTROLS */}
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {/* VIEW SCORE LINK */}
+                        {/* 1. VIEW RESUME BUTTON */}
+                        {app.has_resume ? (
+                          <button
+                            type="button"
+                            onClick={() => setResumeApp(app)}
+                            title={`View ${app.candidate_name}'s original resume`}
+                            className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-sm active:scale-95"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-purple-400" />
+                            <span>Resume</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            title="Resume Not Available: Candidate has not uploaded a resume"
+                            className="px-2.5 py-1.5 bg-slate-950/60 border border-slate-800/50 text-slate-600 rounded-xl text-xs font-medium inline-flex items-center gap-1.5 cursor-not-allowed opacity-60"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-slate-600" />
+                            <span>Resume</span>
+                          </button>
+                        )}
+
+                        {/* 2. VIEW SCORE LINK */}
                         <Link
                           to={`/hr/applications/${app.id}/scorecard`}
                           title="View complete evaluation scorecard"
@@ -636,6 +663,18 @@ export default function HrApplicants() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Resume Viewer Modal */}
+      {resumeApp && (
+        <HrResumeViewer
+          isOpen={!!resumeApp}
+          onClose={() => setResumeApp(null)}
+          applicationId={resumeApp.id}
+          candidateName={resumeApp.candidate_name}
+          candidateId={resumeApp.candidate_id}
+          jobTitle={job?.title || resumeApp.job?.title}
+        />
       )}
     </div>
   );

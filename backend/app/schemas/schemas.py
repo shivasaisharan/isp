@@ -138,6 +138,8 @@ class ApplicationOut(BaseModel):
     candidate_name: Optional[str] = None
     candidate_email: Optional[str] = None
     anonymized_alias: Optional[str] = None
+    has_resume: Optional[bool] = False
+    resume_file_name: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 # --- Interview Schemas ---
@@ -246,6 +248,9 @@ class TopCandidateRecommendation(BaseModel):
     has_interview_report: bool
     report_id: Optional[str] = None
     assessment_status: Optional[str] = None
+    has_resume: Optional[bool] = False
+    resume_file_id: Optional[str] = None
+    resume_file_name: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 # --- Hiring Decision Schemas ---

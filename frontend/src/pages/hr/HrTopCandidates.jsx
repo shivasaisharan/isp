@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  Award, ArrowLeft, ShieldCheck, CheckCircle2, AlertTriangle, Eye, CheckSquare, XCircle, Clock, ShieldAlert, Sparkles, X, Check
+  Award, ArrowLeft, ShieldCheck, CheckCircle2, AlertTriangle, Eye, CheckSquare, XCircle, Clock, ShieldAlert, Sparkles, X, Check, FileText
 } from 'lucide-react';
 import api from '../../services/api';
+import HrResumeViewer from '../../components/HrResumeViewer';
 
 export default function HrTopCandidates() {
   const { jobId } = useParams();
   const [job, setJob] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Resume Viewer State
+  const [resumeCand, setResumeCand] = useState(null);
 
   // Decision Modal State
   const [modalType, setModalType] = useState(null); // 'accept' | 'reject' | null
@@ -257,6 +261,29 @@ export default function HrTopCandidates() {
                 </span>
 
                 <div className="flex items-center gap-3">
+                  {/* VIEW RESUME BUTTON */}
+                  {cand.has_resume ? (
+                    <button
+                      type="button"
+                      onClick={() => setResumeCand(cand)}
+                      title={`View ${cand.candidate_name}'s original resume`}
+                      className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 shadow-sm"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-purple-400" />
+                      View Resume
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      title="Resume Not Available: Candidate has not uploaded a resume"
+                      className="px-4 py-2 bg-slate-950/60 border border-slate-800/50 text-slate-600 rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-not-allowed opacity-60"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-slate-600" />
+                      Resume Not Available
+                    </button>
+                  )}
+
                   <Link
                     to={`/hr/applications/${cand.application_id}/scorecard`}
                     className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
@@ -467,6 +494,18 @@ export default function HrTopCandidates() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Reusable HR Resume Viewer Modal */}
+      {resumeCand && (
+        <HrResumeViewer
+          isOpen={!!resumeCand}
+          onClose={() => setResumeCand(null)}
+          applicationId={resumeCand.application_id}
+          candidateName={resumeCand.candidate_name}
+          candidateId={resumeCand.candidate_id}
+          jobTitle={job?.title || 'Position'}
+        />
       )}
     </div>
   );

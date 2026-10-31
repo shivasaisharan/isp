@@ -261,6 +261,20 @@ def list_job_applicants(
         else:
             assessment_status = "Interview Not Started"
 
+        has_resume = False
+        resume_name = None
+        if a.resume_file:
+            has_resume = True
+            resume_name = a.resume_file.file_name
+        elif a.candidate:
+            latest_res = db.query(ResumeFile).filter(ResumeFile.candidate_id == a.candidate_id).order_by(ResumeFile.uploaded_at.desc()).first()
+            if latest_res:
+                has_resume = True
+                resume_name = latest_res.file_name
+                if not a.resume_file_id:
+                    a.resume_file_id = latest_res.id
+                    db.commit()
+
         out = ApplicationOut.model_validate(a)
         out.candidate_name = cand.full_name if cand else "Candidate"
         out.candidate_email = cand.email if cand else ""
@@ -271,6 +285,8 @@ def list_job_applicants(
         out.assessment_status = assessment_status
         out.overall_ranking_score = overall_fit
         out.job = JobSummary(id=job.id, title=job.title, department=job.department, location=job.location)
+        out.has_resume = has_resume
+        out.resume_file_name = resume_name
         results.append(out)
     return results
 
@@ -655,6 +671,22 @@ def reject_application_route(
     return reject_candidate_application(
         application_id=application_id,
         action_in=action_in,
+        hr_user=hr_user,
+        membership=membership,
+        db=db
+    )
+
+@router.get("/{application_id}/resume")
+def get_application_resume_alias(
+    application_id: str,
+    hr_user: User = Depends(require_hr),
+    membership: OrganizationMembership = Depends(get_current_hr_membership),
+    db: Session = Depends(get_db)
+):
+    """Alias for GET /api/v1/hr/applications/{application_id}/resume."""
+    from app.api.v1.hr_decisions import get_hr_application_resume
+    return get_hr_application_resume(
+        application_id=application_id,
         hr_user=hr_user,
         membership=membership,
         db=db

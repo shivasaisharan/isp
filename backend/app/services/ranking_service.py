@@ -87,6 +87,20 @@ def get_job_top_five_recommendations(db: Session, job_id: str) -> List[Dict[str,
             "Final hiring decision rests exclusively with human recruiters."
         )
 
+        has_resume = False
+        resume_name = None
+        if app.resume_file:
+            has_resume = True
+            resume_name = app.resume_file.file_name
+        elif candidate:
+            from app.models.models import ResumeFile
+            latest_res = db.query(ResumeFile).filter(ResumeFile.candidate_id == candidate.id).order_by(ResumeFile.uploaded_at.desc()).first()
+            if latest_res:
+                has_resume = True
+                resume_name = latest_res.file_name
+                if not app.resume_file_id:
+                    app.resume_file_id = latest_res.id
+
         ranked_candidates.append({
             "application_id": app.id,
             "candidate_id": candidate.id,
@@ -104,7 +118,10 @@ def get_job_top_five_recommendations(db: Session, job_id: str) -> List[Dict[str,
             "assessment_limitations": limitations,
             "has_interview_report": has_report,
             "report_id": report.id if report else None,
-            "assessment_status": assessment_status
+            "assessment_status": assessment_status,
+            "has_resume": has_resume,
+            "resume_file_id": app.resume_file_id,
+            "resume_file_name": resume_name
         })
 
     db.commit()
