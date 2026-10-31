@@ -27,11 +27,12 @@ export default function CandidateApplications() {
     { key: 'interview_pending', label: 'Interview Pending' },
     { key: 'interview_completed', label: 'Interview Completed' },
     { key: 'hr_review', label: 'HR Review' },
-    { key: 'selected', label: 'Selected' },
+    { key: 'accepted', label: 'Accepted' },
   ];
 
   const getStageIndex = (status) => {
-    if (status === 'rejected') return -1;
+    if (status === 'rejected' || status === 'withdrawn') return -1;
+    if (status === 'accepted' || status === 'selected') return 5;
     return stages.findIndex(s => s.key === status);
   };
 
@@ -75,12 +76,12 @@ export default function CandidateApplications() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                      app.status === 'selected' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                      app.status === 'selected' || app.status === 'accepted' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
                       app.status === 'rejected' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
                       app.status === 'interview_completed' ? 'bg-brand-50 text-brand-700 border border-brand-200' :
                       'bg-amber-50 text-amber-700 border border-amber-200'
                     }`}>
-                      {app.status.replace('_', ' ').toUpperCase()}
+                      {app.status === 'selected' ? 'ACCEPTED' : app.status.replace('_', ' ').toUpperCase()}
                     </span>
                   </div>
                 </div>
@@ -116,6 +117,12 @@ export default function CandidateApplications() {
                     <div className="mt-3 p-3 bg-rose-50 text-rose-800 text-xs rounded-xl flex items-center gap-2">
                       <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
                       <span>This application was concluded after HR review. Thank you for your interest.</span>
+                    </div>
+                  )}
+                  {(app.status === 'accepted' || app.status === 'selected') && (
+                    <div className="mt-3 p-3 bg-emerald-50 text-emerald-800 text-xs rounded-xl flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Congratulations! Your application has been accepted for this position. Our hiring team will contact you soon.</span>
                     </div>
                   )}
                 </div>

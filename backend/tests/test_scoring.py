@@ -61,3 +61,4 @@ def test_score_boundaries():
     assert calculate_composite_rank_score(0, 0, 0) == 0.0
     assert calculate_composite_rank_score(100, 100, 100) == 100.0
     assert calculate_composite_rank_score(150, 200, 100) == 100.0
+

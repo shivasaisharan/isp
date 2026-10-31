@@ -6,7 +6,7 @@ from app.models.models import (
     Application, ApplicationStatusHistory, Job, ResumeFile, User, OrganizationMembership,
     InterviewSession, InterviewReport, InterviewQuestion, InterviewAnswer, HiringDecision
 )
-from app.schemas.schemas import ApplicationCreate, ApplicationOut, ApplicationStatusUpdate, JobSummary
+from app.schemas.schemas import ApplicationCreate, ApplicationOut, ApplicationStatusUpdate, JobSummary, DecisionActionRequest
 from app.services.resume_service import analyze_resume_against_job
 from app.services.notification_service import create_notification, record_user_activity, record_audit_log
 from app.core.rubric import calculate_composite_rank_score, INTERVIEW_RUBRIC
@@ -555,3 +555,39 @@ def update_application_status(
     out = ApplicationOut.model_validate(app)
     out.job = JobSummary(id=app.job.id, title=app.job.title, department=app.job.department, location=app.job.location)
     return out
+
+@router.post("/{application_id}/accept")
+def accept_application_route(
+    application_id: str,
+    action_in: DecisionActionRequest,
+    hr_user: User = Depends(require_hr),
+    membership: OrganizationMembership = Depends(get_current_hr_membership),
+    db: Session = Depends(get_db)
+):
+    """Direct HR Accept action endpoint with mandatory decision notes."""
+    from app.api.v1.decisions import accept_candidate_application
+    return accept_candidate_application(
+        application_id=application_id,
+        action_in=action_in,
+        hr_user=hr_user,
+        membership=membership,
+        db=db
+    )
+
+@router.post("/{application_id}/reject")
+def reject_application_route(
+    application_id: str,
+    action_in: DecisionActionRequest,
+    hr_user: User = Depends(require_hr),
+    membership: OrganizationMembership = Depends(get_current_hr_membership),
+    db: Session = Depends(get_db)
+):
+    """Direct HR Reject action endpoint with mandatory rejection notes."""
+    from app.api.v1.decisions import reject_candidate_application
+    return reject_candidate_application(
+        application_id=application_id,
+        action_in=action_in,
+        hr_user=hr_user,
+        membership=membership,
+        db=db
+    )

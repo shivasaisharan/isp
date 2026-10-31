@@ -23,7 +23,7 @@ export default function HrCandidateScorecard() {
 
   // HR Decision Modal State
   const [decisionModalOpen, setDecisionModalOpen] = useState(false);
-  const [decisionType, setDecisionType] = useState('selected');
+  const [decisionType, setDecisionType] = useState('accepted');
   const [rationale, setRationale] = useState('');
   const [submittingDecision, setSubmittingDecision] = useState(false);
   const [decisionSuccess, setDecisionSuccess] = useState('');
@@ -613,40 +613,31 @@ export default function HrCandidateScorecard() {
 
             <form onSubmit={handleDecisionSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-300 uppercase mb-2">Decision Outcome</label>
-                <div className="grid grid-cols-3 gap-2">
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-2">Final Hiring Decision Outcome</label>
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setDecisionType('selected')}
-                    className={`py-2 text-xs font-bold rounded-xl border transition-all ${
-                      decisionType === 'selected'
+                    onClick={() => setDecisionType('accepted')}
+                    className={`py-2.5 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-2 ${
+                      decisionType === 'accepted' || decisionType === 'selected'
                         ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
                         : 'bg-slate-900 text-slate-400 border-slate-800'
                     }`}
                   >
-                    Select
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDecisionType('on_hold')}
-                    className={`py-2 text-xs font-bold rounded-xl border transition-all ${
-                      decisionType === 'on_hold'
-                        ? 'bg-amber-600 text-white border-amber-500 shadow-md'
-                        : 'bg-slate-900 text-slate-400 border-slate-800'
-                    }`}
-                  >
-                    Next Round / Hold
+                    <CheckCircle2 className="w-4 h-4" />
+                    Accept Candidate
                   </button>
                   <button
                     type="button"
                     onClick={() => setDecisionType('rejected')}
-                    className={`py-2 text-xs font-bold rounded-xl border transition-all ${
+                    className={`py-2.5 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-2 ${
                       decisionType === 'rejected'
-                        ? 'bg-red-600 text-white border-red-500 shadow-md'
+                        ? 'bg-rose-600 text-white border-rose-500 shadow-md'
                         : 'bg-slate-900 text-slate-400 border-slate-800'
                     }`}
                   >
-                    Reject
+                    <XCircle className="w-4 h-4" />
+                    Reject Application
                   </button>
                 </div>
               </div>
@@ -688,3 +679,4 @@ export default function HrCandidateScorecard() {
     </div>
   );
 }
+

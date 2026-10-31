@@ -246,10 +246,13 @@ class TopCandidateRecommendation(BaseModel):
     report_id: Optional[str] = None
 
 # --- Hiring Decision Schemas ---
+class DecisionActionRequest(BaseModel):
+    notes: str = Field(..., min_length=3, description="Mandatory HR decision rationale/notes")
+
 class HiringDecisionCreate(BaseModel):
     application_id: str
-    decision: str = Field(..., pattern="^(selected|rejected|on_hold)$")
-    rationale: str = Field(..., min_length=5)
+    decision: str = Field(..., pattern="^(selected|accepted|rejected|on_hold)$")
+    rationale: str = Field(..., min_length=3)
 
 class HiringDecisionOut(BaseModel):
     id: str
