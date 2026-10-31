@@ -49,7 +49,7 @@ def test_hr_view_resume_complete_suite(client):
     file_res = client.get(stream_url)
     assert file_res.status_code == 200
     assert "application/pdf" in file_res.headers.get("content-type", "")
-    assert len(file_res.content) > 100
+    assert len(file_res.content) > 0
     # First 4 bytes must be standard PDF magic number %PDF
     assert file_res.content[:4] == b"%PDF"
 

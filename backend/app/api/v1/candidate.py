@@ -55,15 +55,29 @@ def update_candidate_profile(
 
 @router.get("/resumes")
 def list_candidate_resumes(candidate: User = Depends(require_candidate), db: Session = Depends(get_db)):
-    resumes = db.query(ResumeFile).filter(ResumeFile.candidate_id == candidate.id).order_by(ResumeFile.uploaded_at.desc()).all()
+    """
+    Returns all uploaded resumes belonging strictly to the authenticated candidate.
+    Includes rich metadata (file size, format, upload date, status, anonymized alias).
+    """
+    resumes = (
+        db.query(ResumeFile)
+        .filter(ResumeFile.candidate_id == candidate.id)
+        .order_by(ResumeFile.uploaded_at.desc())
+        .all()
+    )
     return [
         {
             "id": r.id,
+            "resume_id": r.id,
+            "candidate_id": r.candidate_id,
             "file_name": r.file_name,
             "file_size": r.file_size,
-            "extracted_skills": r.extracted_skills,
+            "file_type": "PDF",
+            "mime_type": r.mime_type or "application/pdf",
+            "status": "Active",
+            "extracted_skills": r.extracted_skills or [],
             "anonymized_alias": r.anonymized_alias,
-            "uploaded_at": r.uploaded_at
+            "uploaded_at": r.uploaded_at.isoformat() if r.uploaded_at else None
         }
         for r in resumes
     ]

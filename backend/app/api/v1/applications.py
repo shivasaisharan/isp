@@ -38,15 +38,20 @@ def apply_to_job(
             detail="You have already submitted an active application for this role"
         )
 
-    # Resume handling
+    # Resume handling - must be explicitly selected or latest available, and strictly validated
     resume = None
     if app_in.resume_file_id:
         resume = db.query(ResumeFile).filter(
             ResumeFile.id == app_in.resume_file_id,
             ResumeFile.candidate_id == candidate.id
         ).first()
+        if not resume:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Selected resume does not belong to your account or does not exist."
+            )
     else:
-        # Default to candidate's latest uploaded resume
+        # Default to candidate's latest uploaded resume if present
         resume = db.query(ResumeFile).filter(
             ResumeFile.candidate_id == candidate.id
         ).order_by(ResumeFile.uploaded_at.desc()).first()
@@ -112,14 +117,20 @@ def apply_to_job(
         candidate_id=candidate.id,
         activity_type="APPLICATION_SUBMITTED",
         activity_title="Job Application Submitted",
-        activity_description=f"You successfully applied for {job.title} at {comp_name}.",
+        activity_description=(
+            f"You successfully applied for {job.title} at {comp_name} with resume '{resume.file_name}'."
+            if resume else
+            f"You successfully applied for {job.title} at {comp_name}."
+        ),
         application_id=app.id,
         job_id=job.id,
         company_id=job.organization_id,
         metadata_json={
             "company_name": comp_name,
             "job_title": job.title,
-            "application_ref": f"APP-{app.id[:8].upper()}"
+            "application_ref": f"APP-{app.id[:8].upper()}",
+            "resume_id": resume.id if resume else None,
+            "resume_file_name": resume.file_name if resume else None
         }
     )
 
@@ -136,6 +147,8 @@ def apply_to_job(
     out.job = JobSummary(id=job.id, title=job.title, department=job.department, location=job.location)
     out.candidate_name = candidate.full_name
     out.candidate_email = candidate.email
+    out.has_resume = resume is not None
+    out.resume_file_name = resume.file_name if resume else None
     return out
 
 @router.get("/candidate/all", response_model=List[ApplicationOut])
