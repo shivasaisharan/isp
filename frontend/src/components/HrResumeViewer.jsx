@@ -38,6 +38,7 @@ export default function HrResumeViewer({
   const [totalPages, setTotalPages] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const blobUrlRef = useRef(null);
 
@@ -83,21 +84,24 @@ export default function HrResumeViewer({
           throw new Error('No resume document found for this application.');
         }
 
-        // 2. Fetch the PDF binary via stream endpoint with current HR auth token, or fallback to signed cloud URL
+        // 2. Normalize stream URL (strip redundant /api/v1 prefix since api.baseURL already contains it)
+        let streamUrl = resume.stream_url || `/hr/applications/${applicationId}/resume/file`;
+        if (streamUrl.startsWith('/api/v1/')) {
+          streamUrl = streamUrl.replace('/api/v1', '');
+        }
+
         let pdfBlob = null;
         try {
-          const streamUrl = resume.stream_url || `/hr/applications/${applicationId}/resume/file`;
           const fileRes = await api.get(streamUrl, {
             responseType: 'blob'
           });
-          pdfBlob = new Blob([fileRes.data], { type: 'application/pdf' });
+          pdfBlob = fileRes.data;
         } catch (streamErr) {
-          if (resume.signed_url) {
+          if (resume.signed_url && resume.signed_url.startsWith('http')) {
             try {
               const directRes = await fetch(resume.signed_url);
               if (directRes.ok) {
-                const directBlob = await directRes.blob();
-                pdfBlob = new Blob([directBlob], { type: 'application/pdf' });
+                pdfBlob = await directRes.blob();
               } else {
                 throw streamErr;
               }
@@ -109,25 +113,45 @@ export default function HrResumeViewer({
           }
         }
 
+        if (!pdfBlob) {
+          throw new Error('Empty resume file received from storage server.');
+        }
+
+        // 3. Inspect magic bytes - Verify document begins with valid %PDF- signature
+        const headerSlice = await pdfBlob.slice(0, 5).text();
+        if (headerSlice !== '%PDF-') {
+          // Check if server returned a JSON or HTML error wrapped in blob
+          const textPayload = await pdfBlob.text();
+          try {
+            const errObj = JSON.parse(textPayload);
+            throw new Error(errObj.detail || 'The storage server returned an error message instead of a PDF.');
+          } catch (jsonErr) {
+            if (textPayload.includes('<!doctype') || textPayload.includes('<html')) {
+              throw new Error('Invalid PDF format: Server returned an HTML page instead of PDF document.');
+            }
+            throw new Error('Invalid PDF format: Document does not contain a valid %PDF- header signature.');
+          }
+        }
+
         if (!isMounted) return;
 
         cleanupBlob();
-        const newUrl = URL.createObjectURL(pdfBlob);
+        const newUrl = URL.createObjectURL(new Blob([pdfBlob], { type: 'application/pdf' }));
         blobUrlRef.current = newUrl;
         setBlobUrl(newUrl);
-
-        // Approximate total pages (standard single or dual page resume default)
         setTotalPages(1);
       } catch (err) {
         if (!isMounted) return;
         console.error('Error loading resume:', err);
-        const detail = err.response?.data?.detail;
-        if (err.response?.status === 404) {
-          setError(detail || 'Resume Not Available: No resume document has been uploaded for this candidate application.');
-        } else if (err.response?.status === 403) {
-          setError('Access Denied: You do not have permission to view this application resume.');
+        const detail = err.response?.data?.detail || err.message;
+        if (err.response?.status === 404 || detail?.toLowerCase().includes('not found')) {
+          setError(detail || 'Resume Not Found: The resume file is missing from cloud and local storage.');
+        } else if (err.response?.status === 403 || detail?.toLowerCase().includes('access denied')) {
+          setError('Access Denied: You do not have permission to view resumes outside your organization.');
+        } else if (err.response?.status === 401 || detail?.toLowerCase().includes('token')) {
+          setError('Session Expired: Your access credentials could not be verified. Please reload.');
         } else {
-          setError(detail || err.message || 'Unable to retrieve resume file. Please try again.');
+          setError(detail || 'Failed to load PDF document. Please verify network connectivity.');
         }
       } finally {
         if (isMounted) {
@@ -141,7 +165,7 @@ export default function HrResumeViewer({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, applicationId]);
+  }, [isOpen, applicationId, reloadKey]);
 
   // Handle ESC key to exit fullscreen or close
   useEffect(() => {
@@ -389,20 +413,45 @@ export default function HrResumeViewer({
           )}
 
           {!loading && error && (
-            <div className="max-w-md w-full p-6 bg-slate-900/90 border border-rose-500/30 rounded-2xl text-center space-y-3 shadow-2xl">
-              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+            <div className="max-w-md w-full p-6 bg-slate-900/95 border border-rose-500/30 rounded-2xl text-center space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto shadow-inner">
                 <AlertCircle className="w-6 h-6" />
               </div>
-              <h4 className="text-sm font-bold text-white">Document Not Available</h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                {error}
-              </p>
-              <div className="pt-2">
+              <div>
+                <h4 className="text-sm font-bold text-white mb-1">Preview Unable to Load</h4>
+                <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                  {error}
+                </p>
+                {meta?.resume?.file_name && (
+                  <p className="text-[11px] text-slate-500 font-mono mt-2 truncate">
+                    Document: {meta.resume.file_name}
+                  </p>
+                )}
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-2.5 flex-wrap">
                 <button
-                  onClick={onClose}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700 transition-colors"
+                  type="button"
+                  onClick={() => setReloadKey(prev => prev + 1)}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow-md transition-all flex items-center gap-1.5"
                 >
-                  Close Viewer
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Retry Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white shadow-md transition-all flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download Resume
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-colors"
+                >
+                  Close
                 </button>
               </div>
             </div>
@@ -410,41 +459,17 @@ export default function HrResumeViewer({
 
           {!loading && !error && blobUrl && (
             <div
-              className="w-full h-full flex items-center justify-center transition-transform duration-150 origin-top"
+              className="w-full h-full flex items-center justify-center transition-transform duration-150 origin-top overflow-hidden rounded-xl"
               style={{
                 transform: zoom !== 100 ? `scale(${zoom / 100})` : 'none',
                 transformOrigin: 'top center'
               }}
             >
-              <object
-                data={iframeSrc}
-                type="application/pdf"
-                className="w-full h-full rounded-xl bg-white shadow-2xl border border-slate-800"
-              >
-                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-400 bg-slate-900 rounded-xl">
-                  <FileCheck2 className="w-12 h-12 text-indigo-400 mb-3" />
-                  <h4 className="text-base font-bold text-white mb-1">Preview Ready</h4>
-                  <p className="text-xs text-slate-400 max-w-sm mb-4">
-                    Your browser does not support inline PDF object rendering. You can view or download the resume directly.
-                  </p>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={handleDownload}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg"
-                    >
-                      <Download className="w-4 h-4" /> Download PDF
-                    </button>
-                    <a
-                      href={blobUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-700"
-                    >
-                      <ExternalLink className="w-4 h-4" /> Open in New Tab
-                    </a>
-                  </div>
-                </div>
-              </object>
+              <iframe
+                src={blobUrl}
+                title={meta?.resume?.file_name || `${displayName} Resume`}
+                className="w-full h-full rounded-xl bg-slate-900 border border-slate-800 shadow-2xl"
+              />
             </div>
           )}
         </div>

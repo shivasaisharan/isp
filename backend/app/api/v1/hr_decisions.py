@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse, FileResponse
 from sqlalchemy.orm import Session
 
@@ -242,38 +242,59 @@ def get_hr_application_resume(
 @hr_base_router.get("/applications/{application_id}/resume/file")
 def stream_hr_application_resume_file(
     application_id: str,
+    request: Request,
     token: Optional[str] = Query(None, description="Short-lived token for iframe or direct download"),
     download: bool = Query(False, description="Set true to force attachment download"),
     db: Session = Depends(get_db)
 ):
     """
     Streams the resume PDF binary securely.
-    Supports either token query parameter (for standard browser iframes) or Bearer authorization.
+    Supports either token query parameter (for standard browser iframes) or Bearer authorization header.
     Verifies user role and organization isolation before serving file bytes.
+    Ensures response contains correct Content-Type: application/pdf and Accept-Ranges headers.
     """
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication token required")
+    auth_token = token
+    if not auth_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            auth_token = auth_header.split(" ")[1]
+
+    if not auth_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token required. Provide Bearer header or token query parameter."
+        )
 
     try:
-        payload = decode_access_token(token)
+        payload = decode_access_token(auth_token)
         user_id = payload.get("sub")
         role = payload.get("role")
     except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired access token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token. Please refresh your session."
+        )
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user or user.role != "hr":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only HR users may access candidate resumes")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Only authorized HR recruiters may view candidate resumes."
+        )
 
     membership = db.query(OrganizationMembership).filter(
         OrganizationMembership.user_id == user.id
     ).first()
     if not membership:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active organization membership")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: HR user is not linked to an active organization tenancy."
+        )
 
     app, resume = resolve_application_resume(db, application_id, membership.organization_id)
 
     disposition = "attachment" if download else "inline"
+    safe_filename = resume.file_name.replace('"', '\\"')
 
     # 1. Check local filesystem first
     file_path = Path(resume.file_path)
@@ -285,10 +306,12 @@ def stream_hr_application_resume_file(
     if file_path.exists():
         return FileResponse(
             path=str(file_path),
-            media_type=resume.mime_type or "application/pdf",
+            media_type="application/pdf",
             filename=resume.file_name,
             headers={
-                "Content-Disposition": f'{disposition}; filename="{resume.file_name}"',
+                "Content-Type": "application/pdf",
+                "Content-Disposition": f'{disposition}; filename="{safe_filename}"',
+                "Accept-Ranges": "bytes",
                 "Cache-Control": "private, max-age=3600"
             }
         )
@@ -302,6 +325,7 @@ def stream_hr_application_resume_file(
             storage_candidates = [
                 resume.file_path,
                 f"{resume.candidate_id}/{resume.id}/{resume.file_name}",
+                f"{resume.candidate_id}/{resume.id}/resume.pdf",
                 f"{resume.candidate_id}/{resume.file_name}",
                 f"{resume.candidate_id}/{Path(resume.file_path).name}"
             ]
@@ -309,12 +333,14 @@ def stream_hr_application_resume_file(
                 try:
                     file_bytes = client.storage.from_(bucket).download(sc)
                     if file_bytes:
-                        from fastapi.responses import Response
                         return Response(
                             content=file_bytes,
-                            media_type=resume.mime_type or "application/pdf",
+                            media_type="application/pdf",
                             headers={
-                                "Content-Disposition": f'{disposition}; filename="{resume.file_name}"',
+                                "Content-Type": "application/pdf",
+                                "Content-Disposition": f'{disposition}; filename="{safe_filename}"',
+                                "Accept-Ranges": "bytes",
+                                "Content-Length": str(len(file_bytes)),
                                 "Cache-Control": "private, max-age=3600"
                             }
                         )

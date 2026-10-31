@@ -176,3 +176,4 @@ if __name__ == "__main__":
         target = None
 
     run_migration(target_db_url=target, dry_run=args.dry_run or target is None)
+

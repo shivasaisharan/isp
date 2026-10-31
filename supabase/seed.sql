@@ -35,3 +35,4 @@ INSERT INTO public.jobs (
     'Architect and implement scalable AI inference and candidate evaluation pipelines for Smart Recruit.',
     'published'
 ) ON CONFLICT (id) DO NOTHING;
+
