@@ -61,3 +61,4 @@ CREATE POLICY "Strict immutability - no deletes permitted on audit events"
 ON public.audit_events
 FOR DELETE
 USING (false);
+

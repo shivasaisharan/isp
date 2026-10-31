@@ -179,6 +179,7 @@ class InterviewSessionOut(BaseModel):
 class InterviewViolationCreate(BaseModel):
     violation_type: str
     description: str
+    incident_id: Optional[str] = None
     metadata: Optional[dict] = None
 
 class InterviewViolationOut(BaseModel):

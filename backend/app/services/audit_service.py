@@ -561,3 +561,4 @@ def export_audit_trail_csv(db: Session, organization_id: str) -> str:
         ])
 
     return output.getvalue()
+

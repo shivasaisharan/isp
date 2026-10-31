@@ -186,3 +186,4 @@ def test_audit_trail_organization_isolation(client):
     # Org 2 should only see its own audit records (e.g. HR_REGISTERED), not Org 1's decisions
     for item in org2_audits.json()["items"]:
         assert "Isolated Corp" in (item["company_name"] or "") or item["action"] == "HR_REGISTERED"
+

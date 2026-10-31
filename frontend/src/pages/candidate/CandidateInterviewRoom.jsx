@@ -43,10 +43,17 @@ export default function CandidateInterviewRoom() {
   const recognitionRef = useRef(null);
   const liveTranscriptRef = useRef('');
 
-  // Monitoring Deduplication Ref
-  const lastViolationTimeRef = useRef(0);
+  // Monitoring & Incident Deduplication Refs
+  const violationCountRef = useRef(0);
+  const isInterruptedRef = useRef(false);
+  const isFullscreenRef = useRef(false);
   const isTerminatedRef = useRef(false);
+  const hasStartedSecureModeRef = useRef(false);
+  const currentIncidentIdRef = useRef(null);
+
   isTerminatedRef.current = isTerminated;
+  hasStartedSecureModeRef.current = hasStartedSecureMode;
+  violationCountRef.current = violationCount;
 
   // Load session & live security status
   const fetchSession = async () => {
@@ -74,8 +81,10 @@ export default function CandidateInterviewRoom() {
       try {
         const secRes = await api.get(`/interviews/${sessionId}/security-status`);
         setViolationCount(secRes.data.violation_count);
+        violationCountRef.current = secRes.data.violation_count;
         if (secRes.data.is_terminated) {
           setIsTerminated(true);
+          isTerminatedRef.current = true;
           setTerminationReason(secRes.data.termination_reason);
         }
       } catch (e) {
@@ -134,7 +143,11 @@ export default function CandidateInterviewRoom() {
       }
 
       setIsFullscreen(true);
+      isFullscreenRef.current = true;
       setHasStartedSecureMode(true);
+      hasStartedSecureModeRef.current = true;
+      isInterruptedRef.current = false;
+      currentIncidentIdRef.current = null;
 
       // Play introductory question audio once entered
       if (currentQuestion) {
@@ -149,54 +162,87 @@ export default function CandidateInterviewRoom() {
   };
 
   // =========================================================================
-  // DEDUPLICATED THREE-STRIKE VIOLATION ENGINE
+  // DEDUPLICATED THREE-STRIKE VIOLATION ENGINE (INCIDENT-BASED)
   // =========================================================================
   const triggerViolation = useCallback(async (type, description) => {
-    if (!hasStartedSecureMode || isTerminatedRef.current) return;
+    if (!hasStartedSecureModeRef.current || isTerminatedRef.current) return;
 
-    const now = Date.now();
-    // 3000ms deduplication window: prevents tandem blur + visibilitychange firing twice
-    if (now - lastViolationTimeRef.current < 3000) {
+    // Incident-based deduplication: If already in an active interruption, ignore tandem signals
+    if (isInterruptedRef.current) {
       return;
     }
-    lastViolationTimeRef.current = now;
+
+    // Immediately mark as interrupted and exit fullscreen tracking
+    isInterruptedRef.current = true;
+    isFullscreenRef.current = false;
+    setIsFullscreen(false);
+
+    // Generate unique incident ID for exact request idempotency
+    const incidentId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `inc_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    currentIncidentIdRef.current = incidentId;
+
+    // IMMEDIATE ZERO-DELAY OPTIMISTIC UI UPDATE
+    const nextCount = Math.min(3, violationCountRef.current + 1);
+    violationCountRef.current = nextCount;
+    setViolationCount(nextCount);
+
+    if (nextCount >= 3) {
+      setIsTerminated(true);
+      isTerminatedRef.current = true;
+      setTerminationReason("You have exceeded the permitted number of interview environment violations (3/3 strikes). Your interview has been terminated and flagged for HR review.");
+      setActiveWarning({
+        level: 3,
+        title: "Interview Terminated & Flagged",
+        message: "You have exceeded the permitted number of interview environment violations. Your interview has been safely recorded and submitted to human HR recruiters for review."
+      });
+      if (isListening) stopRecording();
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    } else if (nextCount === 1) {
+      setActiveWarning({
+        level: 1,
+        title: "Interview Security Warning (1 of 3)",
+        message: "You have exited the secure interview environment or switched windows. This activity has been recorded. You have 2 remaining chances before termination."
+      });
+    } else if (nextCount === 2) {
+      setActiveWarning({
+        level: 2,
+        title: "Final Interview Warning (2 of 3)",
+        message: "This is your second security violation. One more confirmed interruption will immediately terminate your interview and flag it for HR review."
+      });
+    }
 
     try {
       const res = await api.post(`/interviews/${sessionId}/violations`, {
+        incident_id: incidentId,
         violation_type: type,
         description: description,
         metadata: { client_timestamp: new Date().toISOString() }
       });
 
-      const newCount = res.data.violation_count;
-      setViolationCount(newCount);
+      const serverCount = res.data.violation_count;
+      if (serverCount !== undefined && serverCount !== nextCount) {
+        setViolationCount(serverCount);
+        violationCountRef.current = serverCount;
+      }
 
-      if (res.data.is_terminated || newCount >= 3) {
+      if (res.data.is_terminated) {
         setIsTerminated(true);
-        setTerminationReason("You have exceeded the permitted number of interview environment violations (3/3 strikes). Your interview has been terminated and flagged for HR review.");
+        isTerminatedRef.current = true;
+        setTerminationReason(res.data.termination_reason || "Interview terminated and flagged for HR review.");
         setActiveWarning({
           level: 3,
           title: "Interview Terminated & Flagged",
           message: "You have exceeded the permitted number of interview environment violations. Your interview has been safely recorded and submitted to human HR recruiters for review."
         });
         if (isListening) stopRecording();
-      } else if (newCount === 1) {
-        setActiveWarning({
-          level: 1,
-          title: "Interview Security Warning (1 of 3)",
-          message: "You have exited the secure interview environment or switched windows. This activity has been recorded. You have 2 remaining chances before termination."
-        });
-      } else if (newCount === 2) {
-        setActiveWarning({
-          level: 2,
-          title: "Final Interview Warning (2 of 3)",
-          message: "This is your second security violation. One more confirmed interruption will immediately terminate your interview and flag it for HR review."
-        });
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
       }
     } catch (err) {
       console.error("Violation sync error:", err);
     }
-  }, [hasStartedSecureMode, sessionId, isListening]);
+  }, [sessionId, isListening]);
 
   // Browser Event Listeners
   useEffect(() => {
@@ -211,8 +257,14 @@ export default function CandidateInterviewRoom() {
         document.msFullscreenElement
       );
       setIsFullscreen(isCurrentlyFs);
+      isFullscreenRef.current = isCurrentlyFs;
+
       if (!isCurrentlyFs && !isTerminatedRef.current) {
         triggerViolation("fullscreen_exit", "Candidate exited browser full-screen mode.");
+      } else if (isCurrentlyFs) {
+        // Recovered full-screen state
+        isInterruptedRef.current = false;
+        currentIncidentIdRef.current = null;
       }
     };
 
@@ -225,12 +277,19 @@ export default function CandidateInterviewRoom() {
 
     // C. Window Blur (Focus Lost)
     const handleWindowBlur = () => {
-      if (!isTerminatedRef.current) {
+      if (!isTerminatedRef.current && isFullscreenRef.current) {
         triggerViolation("focus_lost", "Interview window lost focus.");
       }
     };
 
-    // D. Prevent Accidental Page Refresh / Exit
+    // D. Immediate Escape Key Handler
+    const handleKeyDown = (e) => {
+      if ((e.key === 'Escape' || e.key === 'Esc') && isFullscreenRef.current && !isTerminatedRef.current) {
+        triggerViolation("fullscreen_exit", "Candidate pressed Escape to exit full-screen mode.");
+      }
+    };
+
+    // E. Prevent Accidental Page Refresh / Exit
     const handleBeforeUnload = (e) => {
       e.preventDefault();
       e.returnValue = "Leaving this page may register an interview violation. Are you sure?";
@@ -239,15 +298,21 @@ export default function CandidateInterviewRoom() {
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [hasStartedSecureMode, isTerminated, triggerViolation]);
@@ -259,8 +324,12 @@ export default function CandidateInterviewRoom() {
       if (!document.fullscreenElement) {
         if (elem.requestFullscreen) await elem.requestFullscreen();
         else if (elem.webkitRequestFullscreen) await elem.webkitRequestFullscreen();
+        else if (elem.msRequestFullscreen) await elem.msRequestFullscreen();
       }
       setIsFullscreen(true);
+      isFullscreenRef.current = true;
+      isInterruptedRef.current = false;
+      currentIncidentIdRef.current = null;
       await api.post(`/interviews/${sessionId}/resume-secure-mode`);
     } catch (err) {
       console.warn("Fullscreen re-entry notice:", err);

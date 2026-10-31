@@ -522,28 +522,60 @@ def record_interview_violation(
             "message": "Interview session already concluded or flagged."
         }
 
-    # Deduplication guard: ignore repeat signals within 2.5 seconds
-    recent_violation = db.query(InterviewViolation).filter(
-        InterviewViolation.interview_session_id == session.id
-    ).order_by(InterviewViolation.occurred_at.desc()).first()
+    # Deduplication guard:
+    # 1. Exact incident_id deduplication
+    if violation_in.incident_id:
+        for v in session.violations:
+            if (v.metadata_json or {}).get("incident_id") == violation_in.incident_id:
+                return {
+                    "status": session.status,
+                    "violation_count": session.violation_count,
+                    "remaining_chances": max(0, session.max_violations - session.violation_count),
+                    "is_terminated": session.status == "terminated_flagged",
+                    "deduplicated": True,
+                    "message": "Incident already processed."
+                }
 
     now = datetime.now(timezone.utc)
-    if recent_violation:
+    recent_violation = (
+        db.query(InterviewViolation)
+        .filter(InterviewViolation.interview_session_id == session.id)
+        .order_by(InterviewViolation.occurred_at.desc())
+        .first()
+    )
+
+    # 2. Clustered repeat signals while already in interrupted state
+    if not session.is_secure_mode and recent_violation:
+        return {
+            "status": session.status,
+            "violation_count": session.violation_count,
+            "remaining_chances": max(0, session.max_violations - session.violation_count),
+            "is_terminated": session.status == "terminated_flagged",
+            "deduplicated": True,
+            "message": "Interruption signal clustered with active interruption; deduplicated."
+        }
+
+    # 3. Fallback sub-second cluster guard for legacy clients without incident_id
+    if not violation_in.incident_id and recent_violation:
         delta = (now - recent_violation.occurred_at.replace(tzinfo=timezone.utc)).total_seconds()
-        if delta < 2.5:
-            # Clustered browser event (e.g., blur + visibilitychange triggered in tandem)
+        if delta < 0.75:
             return {
                 "status": session.status,
                 "violation_count": session.violation_count,
                 "remaining_chances": max(0, session.max_violations - session.violation_count),
-                "is_terminated": False,
+                "is_terminated": session.status == "terminated_flagged",
                 "deduplicated": True,
                 "message": "Interruption signal clustered with recent event; deduplicated."
             }
 
-    # Increment violation count
+    # Increment violation count and mark secure mode broken
+    session.is_secure_mode = False
     session.violation_count += 1
     new_violation_num = session.violation_count
+
+    meta = dict(violation_in.metadata or {})
+    if violation_in.incident_id:
+        meta["incident_id"] = violation_in.incident_id
 
     violation_record = InterviewViolation(
         interview_session_id=session.id,
@@ -551,7 +583,7 @@ def record_interview_violation(
         violation_type=violation_in.violation_type,
         description=violation_in.description,
         violation_number=new_violation_num,
-        metadata_json=violation_in.metadata or {},
+        metadata_json=meta,
         occurred_at=now
     )
     db.add(violation_record)
@@ -628,6 +660,8 @@ def record_interview_violation(
         "remaining_chances": max(0, session.max_violations - session.violation_count),
         "is_terminated": is_terminated,
         "flagged_for_review": session.flagged_for_review,
+        "deduplicated": False,
+        "termination_reason": session.termination_reason if is_terminated else None,
         "message": "Violation recorded." if not is_terminated else "Session terminated and flagged for HR review."
     }
 
@@ -649,7 +683,7 @@ def resume_secure_mode(
 
     session.is_secure_mode = True
     db.commit()
-    return {"message": "Secure mode re-engaged", "status": session.status}
+    return {"message": "Secure mode re-engaged", "status": session.status, "is_secure_mode": True}
 
 @router.get("/hr/{session_id}/security-report")
 def get_hr_security_report(
