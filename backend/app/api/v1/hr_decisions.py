@@ -273,29 +273,57 @@ def stream_hr_application_resume_file(
 
     app, resume = resolve_application_resume(db, application_id, membership.organization_id)
 
-    # Locate file on disk
+    disposition = "attachment" if download else "inline"
+
+    # 1. Check local filesystem first
     file_path = Path(resume.file_path)
     if not file_path.is_absolute():
         file_path = settings.UPLOAD_DIR / file_path
     if not file_path.exists():
-        # Fallback to file name in UPLOAD_DIR
         file_path = settings.UPLOAD_DIR / Path(resume.file_path).name
 
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Resume file '{resume.file_name}' not found on storage server"
+    if file_path.exists():
+        return FileResponse(
+            path=str(file_path),
+            media_type=resume.mime_type or "application/pdf",
+            filename=resume.file_name,
+            headers={
+                "Content-Disposition": f'{disposition}; filename="{resume.file_name}"',
+                "Cache-Control": "private, max-age=3600"
+            }
         )
 
-    disposition = "attachment" if download else "inline"
-    return FileResponse(
-        path=str(file_path),
-        media_type=resume.mime_type or "application/pdf",
-        filename=resume.file_name,
-        headers={
-            "Content-Disposition": f'{disposition}; filename="{resume.file_name}"',
-            "Cache-Control": "private, max-age=3600"
-        }
+    # 2. Cloud Fallback: Retrieve binary directly from Supabase Storage
+    if settings.is_supabase_enabled:
+        from app.services.supabase_service import get_supabase_client, SupabaseStorageService
+        client = get_supabase_client()
+        if client:
+            bucket = SupabaseStorageService.BUCKET_RESUMES
+            storage_candidates = [
+                resume.file_path,
+                f"{resume.candidate_id}/{resume.id}/{resume.file_name}",
+                f"{resume.candidate_id}/{resume.file_name}",
+                f"{resume.candidate_id}/{Path(resume.file_path).name}"
+            ]
+            for sc in storage_candidates:
+                try:
+                    file_bytes = client.storage.from_(bucket).download(sc)
+                    if file_bytes:
+                        from fastapi.responses import Response
+                        return Response(
+                            content=file_bytes,
+                            media_type=resume.mime_type or "application/pdf",
+                            headers={
+                                "Content-Disposition": f'{disposition}; filename="{resume.file_name}"',
+                                "Cache-Control": "private, max-age=3600"
+                            }
+                        )
+                except Exception:
+                    continue
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Resume file '{resume.file_name}' not found on storage server or cloud storage."
     )
 
 @router.get("/export")

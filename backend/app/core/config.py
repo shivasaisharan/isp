@@ -46,7 +46,8 @@ class Settings(BaseSettings):
             self.SUPABASE_URL and 
             not self.SUPABASE_URL.startswith("https://your-project") and 
             self.SUPABASE_SERVICE_ROLE_KEY and
-            not self.SUPABASE_SERVICE_ROLE_KEY.startswith("your-")
+            not self.SUPABASE_SERVICE_ROLE_KEY.startswith("your-") and
+            "YOUR_BACKEND_ONLY_SECRET" not in self.SUPABASE_SERVICE_ROLE_KEY
         )
     
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")

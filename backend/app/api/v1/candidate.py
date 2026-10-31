@@ -102,6 +102,7 @@ async def upload_resume(
             detail=f"File exceeds maximum allowed size ({settings.MAX_UPLOAD_SIZE_MB}MB)"
         )
     
+    resume_id = str(uuid.uuid4())
     safe_filename = f"{uuid.uuid4().hex}_{file.filename}"
     file_path = settings.UPLOAD_DIR / safe_filename
     with open(file_path, "wb") as f:
@@ -110,11 +111,11 @@ async def upload_resume(
     extracted_text = extract_text_from_pdf(str(file_path))
     extracted_skills = extract_skills_from_text(extracted_text)
 
-    # Cloud upload to Supabase private storage if configured
+    # Cloud upload to Supabase private storage if configured (structured path: candidate-resumes/{candidate_id}/{resume_id}/{filename})
     supabase_storage_path = None
+    rel_path = f"{candidate.id}/{resume_id}/{file.filename}"
     if settings.is_supabase_enabled:
         from app.services.supabase_service import SupabaseStorageService
-        rel_path = f"{candidate.id}/{safe_filename}"
         supabase_storage_path = SupabaseStorageService.upload_file(
             bucket=SupabaseStorageService.BUCKET_RESUMES,
             path=rel_path,
@@ -129,6 +130,7 @@ async def upload_resume(
         profile.skills = combined_skills
 
     resume_record = ResumeFile(
+        id=resume_id,
         candidate_id=candidate.id,
         file_name=file.filename,
         file_path=supabase_storage_path or str(file_path),

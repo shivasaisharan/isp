@@ -1,8 +1,17 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
-from app.core.config import settings
+from app.core.config import settings, BASE_DIR
 
 db_url = settings.DATABASE_URL
+# Automatically fall back to persistent local storage if placeholder password has not been replaced yet
+if (
+    "[YOUR-PASSWORD]" in db_url or
+    "YOUR_SUPABASE" in db_url or
+    "your-project" in db_url or
+    not db_url.strip()
+):
+    db_url = f"sqlite:///{BASE_DIR / 'smart_recruit_prod.db'}"
+
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 

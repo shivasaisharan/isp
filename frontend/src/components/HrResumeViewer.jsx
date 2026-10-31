@@ -83,15 +83,35 @@ export default function HrResumeViewer({
           throw new Error('No resume document found for this application.');
         }
 
-        // 2. Fetch the PDF binary via stream endpoint with current HR auth token
-        const streamUrl = resume.stream_url || `/hr/applications/${applicationId}/resume/file`;
-        const fileRes = await api.get(streamUrl, {
-          responseType: 'blob'
-        });
+        // 2. Fetch the PDF binary via stream endpoint with current HR auth token, or fallback to signed cloud URL
+        let pdfBlob = null;
+        try {
+          const streamUrl = resume.stream_url || `/hr/applications/${applicationId}/resume/file`;
+          const fileRes = await api.get(streamUrl, {
+            responseType: 'blob'
+          });
+          pdfBlob = new Blob([fileRes.data], { type: 'application/pdf' });
+        } catch (streamErr) {
+          if (resume.signed_url) {
+            try {
+              const directRes = await fetch(resume.signed_url);
+              if (directRes.ok) {
+                const directBlob = await directRes.blob();
+                pdfBlob = new Blob([directBlob], { type: 'application/pdf' });
+              } else {
+                throw streamErr;
+              }
+            } catch {
+              throw streamErr;
+            }
+          } else {
+            throw streamErr;
+          }
+        }
+
         if (!isMounted) return;
 
         cleanupBlob();
-        const pdfBlob = new Blob([fileRes.data], { type: 'application/pdf' });
         const newUrl = URL.createObjectURL(pdfBlob);
         blobUrlRef.current = newUrl;
         setBlobUrl(newUrl);
