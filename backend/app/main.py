@@ -18,7 +18,7 @@ from app.api.v1.interviews import router as interviews_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.rankings import router as rankings_router
 from app.api.v1.decisions import router as decisions_router
-from app.api.v1.hr_decisions import router as hr_decisions_router
+from app.api.v1.hr_decisions import router as hr_decisions_router, hr_base_router
 from app.api.v1.activity import router as activity_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.organization import router as organization_router
@@ -70,6 +70,7 @@ app.include_router(reports_router, prefix=prefix)
 app.include_router(rankings_router, prefix=prefix)
 app.include_router(decisions_router, prefix=prefix)
 app.include_router(hr_decisions_router, prefix=prefix)
+app.include_router(hr_base_router, prefix=prefix)
 app.include_router(activity_router, prefix=prefix)
 app.include_router(notifications_router, prefix=prefix)
 app.include_router(organization_router, prefix=prefix)

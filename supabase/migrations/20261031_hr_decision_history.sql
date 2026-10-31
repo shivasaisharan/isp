@@ -65,3 +65,4 @@ CREATE POLICY "No deletes permitted on immutable decision history"
 ON public.hr_decision_history
 FOR DELETE
 USING (false);
+

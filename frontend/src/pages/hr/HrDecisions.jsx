@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CheckCircle2, XCircle, Clock, ShieldCheck, User, Briefcase,
   Search, Filter, RotateCcw, Download, Calendar, ExternalLink,
   ChevronLeft, ChevronRight, X, AlertCircle, Sparkles, FileText,
-  Building, CheckSquare, RefreshCw
+  Building, CheckSquare, RefreshCw, UserCheck, Users
 } from 'lucide-react';
 import api from '../../services/api';
 
@@ -17,6 +17,8 @@ export default function HrDecisions() {
     decisions_this_month: 0
   });
   const [reviewers, setReviewers] = useState([]);
+  const [loadingReviewers, setLoadingReviewers] = useState(false);
+  const [reviewerError, setReviewerError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -49,13 +51,23 @@ export default function HrDecisions() {
     }
   };
 
-  // Fetch Reviewers for dropdown
+  // Fetch Reviewers for dropdown dynamically from database
   const fetchReviewers = async () => {
     try {
-      const res = await api.get('/hr/decisions/reviewers');
-      setReviewers(res.data);
+      setLoadingReviewers(true);
+      setReviewerError('');
+      let res;
+      try {
+        res = await api.get('/hr/reviewers');
+      } catch (e) {
+        res = await api.get('/hr/decisions/reviewers');
+      }
+      setReviewers(res.data || []);
     } catch (err) {
       console.error('Failed to load reviewers:', err);
+      setReviewerError('Could not retrieve organization HR reviewers.');
+    } finally {
+      setLoadingReviewers(false);
     }
   };
 
@@ -123,6 +135,20 @@ export default function HrDecisions() {
     }, 50);
   };
 
+  const activeReviewerObj = useMemo(() => {
+    if (reviewerFilter === 'all') return null;
+    return reviewers.find(r => r.id === reviewerFilter) || null;
+  }, [reviewerFilter, reviewers]);
+
+  const hasActiveFilters = Boolean(
+    decisionType !== 'all' ||
+    candidateSearch.trim() ||
+    jobTitleSearch.trim() ||
+    reviewerFilter !== 'all' ||
+    startDate ||
+    endDate
+  );
+
   const handleOpenDetails = async (decisionId) => {
     try {
       setModalLoading(true);
@@ -174,9 +200,9 @@ export default function HrDecisions() {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => { fetchDecisions(); fetchSummary(); }}
+            onClick={() => { fetchDecisions(); fetchSummary(); fetchReviewers(); }}
             className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
-            title="Refresh decision records"
+            title="Refresh decision records and reviewers"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Refresh
@@ -256,7 +282,7 @@ export default function HrDecisions() {
           SECTION 2: SEARCH & FILTERS
           ========================================================================= */}
       <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
-        {/* Decision Type Buttons */}
+        {/* Decision Type Buttons & Sorting */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mr-2 flex items-center gap-1.5">
@@ -344,20 +370,40 @@ export default function HrDecisions() {
             </div>
           </div>
 
+          {/* Dynamic HR Reviewer Dropdown */}
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              HR Reviewer
+            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+              <span>HR Reviewer</span>
+              {loadingReviewers && (
+                <span className="text-[10px] text-indigo-400 font-normal animate-pulse">Loading reviewers...</span>
+              )}
             </label>
-            <select
-              value={reviewerFilter}
-              onChange={(e) => setReviewerFilter(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-            >
-              <option value="all">All Reviewers</option>
-              {reviewers.map(r => (
-                <option key={r.id} value={r.id}>{r.name} ({r.email})</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={reviewerFilter}
+                onChange={(e) => {
+                  setReviewerFilter(e.target.value);
+                }}
+                className={`w-full bg-slate-900 border rounded-xl px-3 py-2 text-xs text-slate-200 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors ${
+                  reviewerFilter !== 'all' ? 'border-indigo-500/60 bg-indigo-950/20 text-white' : 'border-slate-800'
+                }`}
+              >
+                <option value="all">All Reviewers (Full Team)</option>
+                {loadingReviewers ? (
+                  <option disabled value="">Loading authorized HR reviewers...</option>
+                ) : reviewerError ? (
+                  <option disabled value="">Error loading reviewers</option>
+                ) : reviewers.length === 0 ? (
+                  <option disabled value="">No HR reviewers found for this organization</option>
+                ) : (
+                  reviewers.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} – {r.designation || 'HR Recruiter'} ({r.email})
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
           </div>
 
           <div className="flex items-end gap-2">
@@ -379,35 +425,59 @@ export default function HrDecisions() {
           </div>
         </form>
 
-        {/* Date Filter Collapsible Row */}
-        <div className="flex flex-wrap items-center gap-3 pt-2 text-xs text-slate-400 border-t border-slate-900">
-          <span className="font-semibold flex items-center gap-1">
-            <Calendar className="w-3.5 h-3.5 text-slate-500" /> Date Range:
-          </span>
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
-            />
-            <span>to</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
-            />
-            {(startDate || endDate) && (
+        {/* Date Filter & Active Filters Pill Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs text-slate-400 border-t border-slate-900">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-semibold flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-slate-500" /> Date Range:
+            </span>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
+              />
+              <span>to</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
+              />
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  onClick={() => { setStartDate(''); setEndDate(''); }}
+                  className="text-[11px] text-indigo-400 hover:underline ml-1"
+                >
+                  Clear Dates
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Active Reviewer Filter Indicator */}
+          {activeReviewerObj && (
+            <div className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/30 px-3 py-1 rounded-xl text-xs text-indigo-300">
+              <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
+              <span>
+                Filtered by: <strong>{activeReviewerObj.name} – {activeReviewerObj.designation}</strong>
+              </span>
               <button
                 type="button"
-                onClick={() => { setStartDate(''); setEndDate(''); }}
-                className="text-[11px] text-indigo-400 hover:underline ml-1"
+                onClick={() => {
+                  setReviewerFilter('all');
+                  setPage(1);
+                  setTimeout(() => fetchDecisions(true), 50);
+                }}
+                className="p-0.5 rounded-md hover:bg-indigo-500/20 text-indigo-300 hover:text-white transition-colors"
+                title="Remove reviewer filter"
               >
-                Clear Dates
+                <X className="w-3 h-3" />
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -436,16 +506,18 @@ export default function HrDecisions() {
             <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
               <CheckSquare className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-bold text-white">No hiring decisions have been recorded yet.</h3>
+            <h3 className="text-sm font-bold text-white">No hiring decisions found.</h3>
             <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Accepted and rejected candidates will appear here automatically whenever authorized HR recruiters finalize hiring decisions in the Applicant Pool or Candidate Scorecard.
+              {hasActiveFilters
+                ? 'No decision records match your current search filters and reviewer selection.'
+                : 'Accepted and rejected candidates will appear here automatically whenever authorized HR recruiters finalize hiring decisions in the Applicant Pool or Candidate Scorecard.'}
             </p>
-            {(candidateSearch || jobTitleSearch || decisionType !== 'all') && (
+            {hasActiveFilters && (
               <button
                 onClick={handleResetFilters}
                 className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-500"
               >
-                Clear Search Filters
+                Clear All Search Filters
               </button>
             )}
           </div>

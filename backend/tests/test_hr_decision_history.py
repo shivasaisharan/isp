@@ -189,7 +189,53 @@ def test_hr_decision_history_full_suite(client):
     assert dec_detail["decision_notes"] is not None
     assert dec_detail["decided_at"] is not None
 
-    # --- TEST 12: Idempotent historical data recovery migration ---
+    # --- TEST 12: Dynamic Reviewer API & Filter Integration ---
+    # 12A. Verify /api/v1/hr/reviewers
+    revs_res1 = client.get("/api/v1/hr/reviewers", headers=hr_headers)
+    assert revs_res1.status_code == 200
+    reviewers_list = revs_res1.json()
+    assert len(reviewers_list) >= 1
+    first_rev = reviewers_list[0]
+    assert "id" in first_rev
+    assert "name" in first_rev
+    assert "email" in first_rev
+    assert "designation" in first_rev
+    assert "display_label" in first_rev
+
+    # 12B. Verify /api/v1/hr/decisions/reviewers returns identical data
+    revs_res2 = client.get("/api/v1/hr/decisions/reviewers", headers=hr_headers)
+    assert revs_res2.status_code == 200
+    assert len(revs_res2.json()) == len(reviewers_list)
+
+    # 12C. Filter decisions by specific reviewer ID
+    rev_id = first_rev["id"]
+    rev_dec_res = client.get(f"/api/v1/hr/decisions?reviewer_id={rev_id}", headers=hr_headers)
+    assert rev_dec_res.status_code == 200
+    for item in rev_dec_res.json()["items"]:
+        assert item["reviewer_id"] == rev_id
+
+    # 12D. Composite filter: Reviewer ID + ACCEPTED
+    comp_acc = client.get(f"/api/v1/hr/decisions?reviewer_id={rev_id}&decision_type=ACCEPTED", headers=hr_headers)
+    assert comp_acc.status_code == 200
+    for item in comp_acc.json()["items"]:
+        assert item["reviewer_id"] == rev_id
+        assert item["decision"] == "ACCEPTED"
+
+    # 12E. Composite filter: Reviewer ID + REJECTED
+    comp_rej = client.get(f"/api/v1/hr/decisions?reviewer_id={rev_id}&decision_type=REJECTED", headers=hr_headers)
+    assert comp_rej.status_code == 200
+    for item in comp_rej.json()["items"]:
+        assert item["reviewer_id"] == rev_id
+        assert item["decision"] == "REJECTED"
+
+    # 12F. Reviewer tenant isolation
+    other_revs = client.get("/api/v1/hr/reviewers", headers=other_headers)
+    assert other_revs.status_code == 200
+    # Other org cannot see Sarah Jenkins or first org reviewers
+    other_rev_ids = {r["id"] for r in other_revs.json()}
+    assert rev_id not in other_rev_ids
+
+    # --- TEST 13: Idempotent historical data recovery migration ---
     db = SessionLocal()
     try:
         run1 = recover_historical_decisions(db)
@@ -197,3 +243,4 @@ def test_hr_decision_history_full_suite(client):
         assert run2 == 0  # Second run must recover 0 new duplicates
     finally:
         db.close()
+

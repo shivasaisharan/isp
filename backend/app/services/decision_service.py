@@ -426,6 +426,90 @@ def get_hr_decision_summary_counts(db: Session, organization_id: str) -> Dict[st
         "decisions_this_month": decisions_this_month
     }
 
+def get_organization_reviewers_list(db: Session, organization_id: str) -> List[Dict[str, Any]]:
+    """
+    Retrieves all registered and authorized HR users belonging to the specified organization.
+    Combines active organization memberships with any historical decision reviewers.
+    Formats with proper role, designation, decision counts, and internal user ID.
+    """
+    memberships = (
+        db.query(OrganizationMembership)
+        .filter(OrganizationMembership.organization_id == organization_id)
+        .all()
+    )
+
+    reviewers_map: Dict[str, Dict[str, Any]] = {}
+
+    for m in memberships:
+        user = m.user
+        if not user:
+            continue
+        role_key = (m.role or "recruiter").lower()
+        if role_key in ["owner", "admin"]:
+            designation = "Recruiter Admin"
+        elif role_key in ["lead", "manager", "senior"]:
+            designation = "Senior Recruiter"
+        else:
+            designation = "HR Recruiter"
+
+        dec_count = (
+            db.query(HrDecisionHistory)
+            .filter(
+                HrDecisionHistory.organization_id == organization_id,
+                HrDecisionHistory.reviewer_id == user.id
+            )
+            .count()
+        )
+
+        reviewers_map[user.id] = {
+            "id": user.id,
+            "name": user.full_name,
+            "email": user.email,
+            "role": role_key,
+            "designation": designation,
+            "display_label": f"{user.full_name} – {designation}",
+            "decisions_count": dec_count
+        }
+
+    # Also capture historical reviewers who may not have current active membership records
+    hist_decisions = (
+        db.query(HrDecisionHistory.reviewer_id)
+        .filter(
+            HrDecisionHistory.organization_id == organization_id,
+            HrDecisionHistory.reviewer_id.isnot(None)
+        )
+        .distinct()
+        .all()
+    )
+    for (r_id,) in hist_decisions:
+        if r_id and r_id not in reviewers_map:
+            user = db.query(User).filter(User.id == r_id).first()
+            if user:
+                dec_count = (
+                    db.query(HrDecisionHistory)
+                    .filter(
+                        HrDecisionHistory.organization_id == organization_id,
+                        HrDecisionHistory.reviewer_id == r_id
+                    )
+                    .count()
+                )
+                reviewers_map[r_id] = {
+                    "id": user.id,
+                    "name": user.full_name,
+                    "email": user.email,
+                    "role": "recruiter",
+                    "designation": "HR Reviewer (Historical)",
+                    "display_label": f"{user.full_name} – HR Reviewer (Historical)",
+                    "decisions_count": dec_count
+                }
+
+    # Sort: Recruiter Admins first, then alphabetical by name
+    sorted_reviewers = sorted(
+        reviewers_map.values(),
+        key=lambda r: (0 if "Admin" in r["designation"] else 1, r["name"].lower())
+    )
+    return sorted_reviewers
+
 def export_hr_decisions_csv(db: Session, organization_id: str) -> str:
     """
     Generates CSV string containing complete HR decision audit trail.

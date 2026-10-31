@@ -135,4 +135,20 @@ Prior to this release, rejected candidates and historical decision trails were n
   - Audit CSV export and page refresh capabilities.
 - **Automated Verification:** Added `tests/test_hr_decision_history.py` covering all 12 validation scenarios. 15 of 15 backend tests pass.
 
+---
+
+## 6. Phase 13: Dynamic HR Reviewer Filter & Database-Driven Reviewer Intelligence
+
+### A. Architectural Enhancements
+- **Dynamic Reviewer Discovery (`get_organization_reviewers_list`):** Replaced static/hardcoded values with database queries against `OrganizationMembership` and `User` models scoped to the authenticated HR recruiter's organization.
+- **Role & Designation Resolution:** Maps internal organization roles (`admin`, `owner`, `lead`, `recruiter`) into professional designations (`Recruiter Admin`, `Senior Recruiter`, `HR Recruiter`) alongside actual historical decision counts.
+- **Dual API Access:** Implemented both `GET /api/v1/hr/reviewers` and `GET /api/v1/hr/decisions/reviewers` with organization-level tenancy enforcement.
+- **Reviewer-Specific Filtering:** Enables filtering by internal reviewer user ID (UUID) combined with outcome (`ACCEPTED`, `REJECTED`), candidate search, position search, date range, and sorting.
+- **Enhanced UI Reviewer Selector (`HrDecisions.jsx`):**
+  - Dropdown populated dynamically: `{name} – {designation} ({email})` with internal `value={user.id}`.
+  - Active filter indicator badge with one-click clear button (`×`).
+  - Loading, empty ("No HR reviewers found for this organization"), and error fallback states.
+- **Automated Test Coverage:** Verified dynamic reviewer endpoints, tenant isolation, and multi-criteria composite filtering in `backend/tests/test_hr_decision_history.py` (15/15 tests passing).
+
+
 

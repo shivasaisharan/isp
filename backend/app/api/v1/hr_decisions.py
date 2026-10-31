@@ -14,7 +14,8 @@ from app.schemas.schemas import (
 from app.services.decision_service import (
     get_hr_decision_history_paginated,
     get_hr_decision_summary_counts,
-    export_hr_decisions_csv
+    export_hr_decisions_csv,
+    get_organization_reviewers_list
 )
 from app.services.ranking_service import calculate_composite_rank_score
 
@@ -75,19 +76,28 @@ def list_hr_reviewers(
     db: Session = Depends(get_db)
 ):
     """
-    Lists distinct HR reviewers who have recorded decisions in this organization.
+    Lists all authorized HR reviewers belonging to the authenticated user's organization.
     """
-    reviewers = (
-        db.query(User)
-        .join(HrDecisionHistory, HrDecisionHistory.reviewer_id == User.id)
-        .filter(HrDecisionHistory.organization_id == membership.organization_id)
-        .distinct()
-        .all()
+    return get_organization_reviewers_list(
+        db=db,
+        organization_id=membership.organization_id
     )
-    return [
-        {"id": u.id, "name": u.full_name, "email": u.email}
-        for u in reviewers
-    ]
+
+hr_base_router = APIRouter(prefix="/hr", tags=["HR Reviewers Management"])
+
+@hr_base_router.get("/reviewers")
+def list_hr_reviewers_direct(
+    hr_user: User = Depends(require_hr),
+    membership: OrganizationMembership = Depends(get_current_hr_membership),
+    db: Session = Depends(get_db)
+):
+    """
+    Direct endpoint for retrieving authorized HR reviewers: GET /api/v1/hr/reviewers.
+    """
+    return get_organization_reviewers_list(
+        db=db,
+        organization_id=membership.organization_id
+    )
 
 @router.get("/export")
 def export_decisions_csv(
@@ -173,3 +183,4 @@ def get_hr_decision_detail(
         "interview_score": round(int_score, 1) if int_score is not None else None,
         "overall_fit_score": round(overall_fit, 1)
     }
+
