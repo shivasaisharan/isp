@@ -18,7 +18,11 @@ function isJwtExpired(token, bufferSeconds = 15) {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return false; // not a standard JWT, don't treat as expired
-    const payload = JSON.parse(atob(parts[1]));
+    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) {
+      base64 += '=';
+    }
+    const payload = JSON.parse(atob(base64));
     if (payload.exp) {
       return Date.now() / 1000 >= payload.exp - bufferSeconds;
     }
@@ -37,7 +41,7 @@ function isJwtExpired(token, bufferSeconds = 15) {
 export async function getValidAuthToken() {
   let token = localStorage.getItem('smart_recruit_token');
 
-  // If token is present and not expired, use it
+  // If token is present and not expired, use it immediately
   if (token && !isJwtExpired(token)) {
     return token;
   }
@@ -76,6 +80,7 @@ export async function getValidAuthToken() {
     // ignore parsing errors
   }
 
+  // Return existing token even if near expiry if no other valid token was found
   return token || null;
 }
 
@@ -111,14 +116,17 @@ api.interceptors.response.use(
     }
 
     if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-      // Clear outdated or mismatched role tokens
-      if (
-        error.response.data?.detail?.includes("Candidate portal permission required") ||
-        error.response.data?.detail?.includes("HR Recruiter portal permission required") ||
-        error.response.data?.detail?.includes("Authentication credentials were not provided")
-      ) {
-        localStorage.removeItem('smart_recruit_token');
-        localStorage.removeItem('smart_recruit_user');
+      const detail = error.response.data?.detail;
+      if (typeof detail === 'string') {
+        // Clear tokens only for explicit role permission rejections or invalid deleted accounts
+        if (
+          detail.includes("Candidate portal permission required") ||
+          detail.includes("HR Recruiter portal permission required") ||
+          detail.includes("User associated with token no longer exists")
+        ) {
+          localStorage.removeItem('smart_recruit_token');
+          localStorage.removeItem('smart_recruit_user');
+        }
       }
     }
     return Promise.reject(error);

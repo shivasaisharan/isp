@@ -7,6 +7,7 @@ from app.schemas.schemas import JobCreate, JobUpdate, JobOut
 from app.services.notification_service import record_audit_log
 
 router = APIRouter(prefix="/jobs", tags=["Job Management"])
+hr_jobs_router = APIRouter(prefix="/hr/jobs", tags=["HR Job Management"])
 
 @router.get("", response_model=List[JobOut])
 def list_published_jobs(
@@ -79,19 +80,39 @@ def create_job(
             detail=f"Active jobs limit ({membership.organization.active_jobs_limit}) reached for your {membership.organization.plan} plan."
         )
 
+    # Deduplicate skills case-insensitively
+    def dedup(items):
+        if not items:
+            return []
+        seen = set()
+        res = []
+        for x in items:
+            if isinstance(x, str):
+                c = x.strip()
+                if c and c.lower() not in seen:
+                    seen.add(c.lower())
+                    res.append(c)
+        return res
+
+    req_skills = dedup(job_in.required_skills)
+    pref_skills = dedup(job_in.preferred_skills)
+    loc = job_in.location or getattr(job_in, 'location_scope', None) or "Remote / Hybrid"
+    sal = job_in.salary_range or getattr(job_in, 'compensation_range', None) or "$90,000 - $130,000"
+    stat = (job_in.status or "published").strip().lower()
+
     job = Job(
         organization_id=membership.organization_id,
         created_by_id=hr_user.id,
-        title=job_in.title,
-        department=job_in.department,
-        experience_level=job_in.experience_level,
-        location=job_in.location,
-        employment_type=job_in.employment_type,
-        salary_range=job_in.salary_range,
-        required_skills=job_in.required_skills,
-        preferred_skills=job_in.preferred_skills,
-        description=job_in.description,
-        status=job_in.status
+        title=job_in.title.strip(),
+        department=job_in.department.strip(),
+        experience_level=job_in.experience_level.strip(),
+        location=loc.strip(),
+        employment_type=job_in.employment_type.strip(),
+        salary_range=sal.strip(),
+        required_skills=req_skills,
+        preferred_skills=pref_skills,
+        description=job_in.description.strip(),
+        status=stat
     )
     db.add(job)
     db.commit()
@@ -180,3 +201,23 @@ def delete_job(
     )
 
     return {"message": "Job successfully deleted"}
+
+# --- Dedicated /hr/jobs endpoints ---
+@hr_jobs_router.get("", response_model=List[JobOut])
+def list_hr_jobs_direct(
+    hr_user: User = Depends(require_hr),
+    membership: OrganizationMembership = Depends(get_current_hr_membership),
+    db: Session = Depends(get_db)
+):
+    """Retrieve all jobs under the current HR recruiter's organization tenancy."""
+    return list_organization_jobs(hr_user=hr_user, membership=membership, db=db)
+
+@hr_jobs_router.post("", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+def create_hr_job_direct(
+    job_in: JobCreate,
+    hr_user: User = Depends(require_hr),
+    membership: OrganizationMembership = Depends(get_current_hr_membership),
+    db: Session = Depends(get_db)
+):
+    """Create and publish a new job opening under the current HR recruiter's tenancy."""
+    return create_job(job_in=job_in, hr_user=hr_user, membership=membership, db=db)

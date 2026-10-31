@@ -1,6 +1,6 @@
 from typing import List, Optional, Any, Dict
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, model_validator
 
 # --- Auth & User Schemas ---
 class UserBase(BaseModel):
@@ -70,26 +70,100 @@ class JobBase(BaseModel):
     department: str
     experience_level: str = "Mid-Level"
     location: str = "Remote / Hybrid"
+    location_scope: Optional[str] = None
     employment_type: str = "Full-Time"
     salary_range: Optional[str] = "$90,000 - $130,000"
+    compensation_range: Optional[str] = None
     required_skills: List[str] = []
     preferred_skills: List[str] = []
     description: str
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_job_base(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Location alias mapping
+            if not data.get("location") and data.get("location_scope"):
+                data["location"] = data["location_scope"]
+            elif not data.get("location_scope") and data.get("location"):
+                data["location_scope"] = data.get("location")
+
+            # Compensation / salary alias mapping
+            if not data.get("salary_range") and data.get("compensation_range"):
+                data["salary_range"] = data["compensation_range"]
+            elif not data.get("compensation_range") and data.get("salary_range"):
+                data["compensation_range"] = data.get("salary_range")
+
+            # Deduplicate skills case-insensitively
+            if "required_skills" in data and isinstance(data["required_skills"], list):
+                seen = set()
+                deduped = []
+                for s in data["required_skills"]:
+                    if isinstance(s, str):
+                        cleaned = s.strip()
+                        if cleaned and cleaned.lower() not in seen:
+                            seen.add(cleaned.lower())
+                            deduped.append(cleaned)
+                data["required_skills"] = deduped
+
+            if "preferred_skills" in data and isinstance(data["preferred_skills"], list):
+                seen = set()
+                deduped = []
+                for s in data["preferred_skills"]:
+                    if isinstance(s, str):
+                        cleaned = s.strip()
+                        if cleaned and cleaned.lower() not in seen:
+                            seen.add(cleaned.lower())
+                            deduped.append(cleaned)
+                data["preferred_skills"] = deduped
+        return data
+
 class JobCreate(JobBase):
     status: str = "published"
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_job_create(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "status" in data and isinstance(data["status"], str):
+                data["status"] = data["status"].strip().lower()
+        return data
 
 class JobUpdate(BaseModel):
     title: Optional[str] = None
     department: Optional[str] = None
     experience_level: Optional[str] = None
     location: Optional[str] = None
+    location_scope: Optional[str] = None
     employment_type: Optional[str] = None
     salary_range: Optional[str] = None
+    compensation_range: Optional[str] = None
     required_skills: Optional[List[str]] = None
     preferred_skills: Optional[List[str]] = None
     description: Optional[str] = None
     status: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_job_update(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("location") and data.get("location_scope"):
+                data["location"] = data["location_scope"]
+            if not data.get("salary_range") and data.get("compensation_range"):
+                data["salary_range"] = data["compensation_range"]
+            if "status" in data and isinstance(data["status"], str):
+                data["status"] = data["status"].strip().lower()
+            if "required_skills" in data and isinstance(data["required_skills"], list):
+                seen = set()
+                deduped = []
+                for s in data["required_skills"]:
+                    if isinstance(s, str):
+                        cleaned = s.strip()
+                        if cleaned and cleaned.lower() not in seen:
+                            seen.add(cleaned.lower())
+                            deduped.append(cleaned)
+                data["required_skills"] = deduped
+        return data
 
 class JobOut(JobBase):
     id: str

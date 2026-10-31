@@ -22,10 +22,11 @@ export default function HrJobCreate() {
   const [error, setError] = useState('');
 
   const addSkill = () => {
-    if (newSkill.trim() && !formData.required_skills.includes(newSkill.trim())) {
+    const trimmed = newSkill.trim();
+    if (trimmed && !formData.required_skills.some(s => s.toLowerCase() === trimmed.toLowerCase())) {
       setFormData({
         ...formData,
-        required_skills: [...formData.required_skills, newSkill.trim()]
+        required_skills: [...formData.required_skills, trimmed]
       });
       setNewSkill('');
     }
@@ -34,24 +35,66 @@ export default function HrJobCreate() {
   const removeSkill = (skToRemove) => {
     setFormData({
       ...formData,
-      required_skills: formData.required_skills.filter(s => s !== skToRemove)
+      required_skills: formData.required_skills.filter(s => s.toLowerCase() !== skToRemove.toLowerCase())
     });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title || !formData.description) {
+    if (!formData.title?.trim() || !formData.description?.trim()) {
       setError("Please fill in role title and comprehensive description.");
       return;
     }
+    if (!formData.required_skills || formData.required_skills.length === 0) {
+      setError("Please add at least one required technical competency.");
+      return;
+    }
+
     setError('');
     setLoading(true);
 
+    // Clean and deduplicate skills case-insensitively
+    const seen = new Set();
+    const cleanSkills = [];
+    for (const sk of formData.required_skills) {
+      const trimmed = sk.trim();
+      if (trimmed && !seen.has(trimmed.toLowerCase())) {
+        seen.add(trimmed.toLowerCase());
+        cleanSkills.push(trimmed);
+      }
+    }
+
+    const payload = {
+      ...formData,
+      title: formData.title.trim(),
+      description: formData.description.trim(),
+      location: formData.location?.trim() || "Remote / Hybrid",
+      salary_range: formData.salary_range?.trim() || "$110,000 - $140,000",
+      required_skills: cleanSkills,
+      status: (formData.status || 'published').toLowerCase()
+    };
+
     try {
-      await api.post('/jobs', formData);
+      try {
+        await api.post('/hr/jobs', payload);
+      } catch (postErr) {
+        if (postErr.response?.status === 404) {
+          await api.post('/jobs', payload);
+        } else {
+          throw postErr;
+        }
+      }
       navigate('/hr/jobs');
     } catch (err) {
-      setError(err.response?.data?.detail || "Failed to create job opening.");
+      console.error("Job creation error:", err);
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setError(detail);
+      } else if (Array.isArray(detail)) {
+        setError(detail.map(d => d.msg || JSON.stringify(d)).join(', '));
+      } else {
+        setError("Failed to create job opening. Please check your network and session.");
+      }
     } finally {
       setLoading(false);
     }

@@ -78,6 +78,25 @@ def get_current_user(
                 anonymized_alias=generate_anonymized_alias()
             )
             db.add(profile)
+        elif role == "hr":
+            from app.models.models import Organization, OrganizationMembership
+            import re
+            org = db.query(Organization).first()
+            if not org:
+                base_slug = re.sub(r'[^a-z0-9]+', '-', user.full_name.lower()).strip('-') or "default-org"
+                org = Organization(
+                    name=f"{user.full_name}'s Organization",
+                    slug=f"{base_slug}-{user.id[:8]}",
+                    plan="professional"
+                )
+                db.add(org)
+                db.flush()
+            membership = OrganizationMembership(
+                organization_id=org.id,
+                user_id=user.id,
+                role="admin"
+            )
+            db.add(membership)
             
         db.commit()
         db.refresh(user)
@@ -115,8 +134,24 @@ def get_current_hr_membership(
         .first()
     )
     if not membership:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="HR user is not linked to any active organization tenancy"
+        from app.models.models import Organization
+        import re
+        org = db.query(Organization).first()
+        if not org:
+            base_slug = re.sub(r'[^a-z0-9]+', '-', hr_user.full_name.lower()).strip('-') or "default-org"
+            org = Organization(
+                name=f"{hr_user.full_name}'s Organization",
+                slug=f"{base_slug}-{hr_user.id[:8]}",
+                plan="professional"
+            )
+            db.add(org)
+            db.flush()
+        membership = OrganizationMembership(
+            organization_id=org.id,
+            user_id=hr_user.id,
+            role="admin"
         )
+        db.add(membership)
+        db.commit()
+        db.refresh(membership)
     return membership

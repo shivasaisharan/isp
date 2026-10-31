@@ -13,7 +13,7 @@ from app.services.activity_service import backfill_historical_recruitment_activi
 # Routers
 from app.api.v1.auth import router as auth_router
 from app.api.v1.candidate import router as candidate_router
-from app.api.v1.jobs import router as jobs_router
+from app.api.v1.jobs import router as jobs_router, hr_jobs_router
 from app.api.v1.applications import router as applications_router
 from app.api.v1.interviews import router as interviews_router
 from app.api.v1.reports import router as reports_router
@@ -68,6 +68,7 @@ prefix = settings.API_V1_PREFIX
 app.include_router(auth_router, prefix=prefix)
 app.include_router(candidate_router, prefix=prefix)
 app.include_router(jobs_router, prefix=prefix)
+app.include_router(hr_jobs_router, prefix=prefix)
 app.include_router(applications_router, prefix=prefix)
 app.include_router(interviews_router, prefix=prefix)
 app.include_router(reports_router, prefix=prefix)
