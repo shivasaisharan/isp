@@ -97,3 +97,4 @@ CREATE TABLE IF NOT EXISTS public.interview_session_metadata (
 
 CREATE INDEX IF NOT EXISTS idx_session_metadata_session ON public.interview_session_metadata(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_metadata_verdict ON public.interview_session_metadata(proctoring_verdict);
+

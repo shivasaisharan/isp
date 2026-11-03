@@ -141,3 +141,4 @@ def test_interview_proctoring_and_recording_pipeline(client):
     review_after = client.get(f"/api/v1/interviews/{session_id}/proctoring-review", headers=hr_headers)
     assert review_after.json()["proctoring_verdict"] == "cleared"
     assert "No unauthorized behavior" in review_after.json()["reviewer_notes"]
+
