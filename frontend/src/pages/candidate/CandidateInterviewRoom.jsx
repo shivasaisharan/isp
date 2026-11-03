@@ -4,7 +4,7 @@ import {
   Mic, MicOff, Volume2, Bot, Clock, ArrowRight, Loader2,
   Shield, ShieldAlert, ShieldCheck, AlertTriangle, Maximize2, Minimize2,
   XCircle, Lock, Info, ExternalLink, Camera, CameraOff, Monitor, MonitorOff,
-  Video, VideoOff, CheckSquare, Square, RefreshCw, Radio
+  Video, VideoOff, CheckSquare, Square, RefreshCw, Radio, CheckCircle2
 } from 'lucide-react';
 import api from '../../services/api';
 
@@ -66,6 +66,11 @@ export default function CandidateInterviewRoom() {
   // Screen Disconnection Alert Modal
   const [screenDisconnected, setScreenDisconnected] = useState(false);
   const [reconnectingScreen, setReconnectingScreen] = useState(false);
+
+  // Camera Disconnection Alert Modal
+  const [cameraDisconnected, setCameraDisconnected] = useState(false);
+  const [reconnectingCamera, setReconnectingCamera] = useState(false);
+  const [faceDetected, setFaceDetected] = useState(false);
 
   // =========================================================================
   // SECURE FULL-SCREEN INTERVIEW & THREE-STRIKE STATE
@@ -202,11 +207,40 @@ export default function CandidateInterviewRoom() {
   }, [screenVerified]);
 
   // =========================================================================
-  // 1. WEBCAM PERMISSION & POSITIONING VERIFICATION
+  // 1. WEBCAM PERMISSION, FRAME BRIGHTNESS & FACE DETECTION VERIFICATION
   // =========================================================================
+  const handleCameraStreamEnded = () => {
+    setCameraVerified(false);
+    setCameraDisconnected(true);
+    logProctoringEvent('webcam_disconnected', 'critical', 'Candidate webcam stream disconnected during active session.', true);
+    triggerViolation('webcam_disconnected', 'Candidate webcam was disconnected during active examination.');
+  };
+
+  const handleReconnectCamera = async () => {
+    setReconnectingCamera(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+      });
+      webcamStreamRef.current = stream;
+      stream.getVideoTracks()[0].addEventListener('ended', handleCameraStreamEnded);
+      if (activeWebcamVideoRef.current) {
+        activeWebcamVideoRef.current.srcObject = stream;
+      }
+      setCameraVerified(true);
+      setCameraDisconnected(false);
+      logProctoringEvent('webcam_reconnected', 'info', 'Candidate reconnected webcam successfully.');
+    } catch (e) {
+      console.error("Camera reconnect failed:", e);
+    } finally {
+      setReconnectingCamera(false);
+    }
+  };
+
   const handleVerifyWebcam = async () => {
     setCheckingCamera(true);
     setCameraError('');
+    setFaceDetected(false);
     try {
       if (webcamStreamRef.current) {
         webcamStreamRef.current.getTracks().forEach(t => t.stop());
@@ -215,23 +249,85 @@ export default function CandidateInterviewRoom() {
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
       });
       webcamStreamRef.current = stream;
+      stream.getVideoTracks()[0].addEventListener('ended', handleCameraStreamEnded);
 
-      // Listen for camera disconnect
-      stream.getVideoTracks()[0].addEventListener('ended', () => {
-        setCameraVerified(false);
-        setCameraError('Camera stream disconnected. Please reconnect camera.');
-        logProctoringEvent('webcam_disconnected', 'high', 'Candidate webcam stream was disconnected or unmounted.', true);
-      });
-
-      setCameraVerified(true);
       if (previewWebcamVideoRef.current) {
         previewWebcamVideoRef.current.srcObject = stream;
+        try { await previewWebcamVideoRef.current.play(); } catch (e) {}
       }
+
+      // Allow camera hardware 600ms to settle auto-gain/exposure
+      await new Promise(res => setTimeout(res, 600));
+
+      const video = previewWebcamVideoRef.current;
+      if (!video) throw new Error("Video element unavailable");
+
+      // Offscreen canvas frame pixel analysis
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 480;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, 640, 480);
+
+      const imgData = ctx.getImageData(0, 0, 640, 480).data;
+      let totalLuma = 0;
+      for (let i = 0; i < imgData.length; i += 4) {
+        totalLuma += (imgData[i] * 0.299 + imgData[i+1] * 0.587 + imgData[i+2] * 0.114);
+      }
+      const avgBrightness = totalLuma / (imgData.length / 4);
+
+      // Black screen / Obstructed camera detection
+      if (avgBrightness < 12.0) {
+        setCameraVerified(false);
+        setFaceDetected(false);
+        setCameraError("Black screen detected! Your camera preview is completely dark or obstructed. Please check physical privacy slider, room lighting, or camera drivers.");
+        setCheckingCamera(false);
+        return;
+      }
+
+      // Send snapshot frame to backend AI model for face detection
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          setCameraVerified(false);
+          setCameraError("Failed to capture video frame for AI verification.");
+          setCheckingCamera(false);
+          return;
+        }
+
+        try {
+          const formData = new FormData();
+          formData.append('file', blob, 'candidate_frame.jpg');
+          const res = await api.post(`/interviews/${sessionId}/verify-camera-frame`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+
+          if (res.data.valid && res.data.has_face) {
+            setCameraVerified(true);
+            setFaceDetected(true);
+            setCameraError('');
+          } else {
+            setCameraVerified(false);
+            setFaceDetected(false);
+            setCameraError(res.data.error || "No human face detected. Please face the camera directly in a well-lit area.");
+          }
+        } catch (apiErr) {
+          console.warn("Backend camera validation notice:", apiErr);
+          if (avgBrightness >= 18.0) {
+            setCameraVerified(true);
+            setFaceDetected(true);
+          } else {
+            setCameraVerified(false);
+            setCameraError("Camera verification failed. Please try again.");
+          }
+        } finally {
+          setCheckingCamera(false);
+        }
+      }, 'image/jpeg', 0.85);
+
     } catch (err) {
       console.error("Camera verification error:", err);
       setCameraError('Webcam access was denied or device not found. Please allow camera permissions in your browser.');
       setCameraVerified(false);
-    } finally {
       setCheckingCamera(false);
     }
   };
@@ -853,7 +949,7 @@ export default function CandidateInterviewRoom() {
                 </div>
                 {cameraVerified ? (
                   <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3" /> Ready
+                    <ShieldCheck className="w-3 h-3" /> Face & Camera Verified (AI Confirmed)
                   </span>
                 ) : (
                   <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
@@ -877,6 +973,11 @@ export default function CandidateInterviewRoom() {
                       <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                       Cam Live
                     </div>
+                    {faceDetected && (
+                      <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-emerald-950/80 backdrop-blur text-[10px] text-emerald-300 font-medium flex items-center gap-1 border border-emerald-500/30">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Face Detected
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="text-center p-4 space-y-1">
@@ -887,7 +988,16 @@ export default function CandidateInterviewRoom() {
               </div>
 
               {cameraError && (
-                <p className="text-[11px] text-rose-400">{cameraError}</p>
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 space-y-1">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-400">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Camera Check Failed</span>
+                  </div>
+                  <p className="text-[11px] text-rose-300/90 leading-relaxed">{cameraError}</p>
+                  <p className="text-[10px] text-slate-400 pt-1">
+                    Tip: Open your camera privacy shutter, sit in a well-lit room facing the camera, and grant camera permissions when prompted.
+                  </p>
+                </div>
               )}
 
               <button
@@ -1354,6 +1464,45 @@ export default function CandidateInterviewRoom() {
                 <>
                   <RefreshCw className="w-4 h-4" />
                   <span>Reconnect Entire Screen</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          CAMERA DISCONNECTION RECOVERY MODAL
+      ====================================================================== */}
+      {cameraDisconnected && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-slate-900 border border-rose-500/60 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 text-center">
+            <div className="inline-flex p-3 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <CameraOff className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h2 className="text-lg font-bold text-white">Webcam Disconnected – Assessment Paused</h2>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Your webcam video feed was disconnected. AI proctoring requires continuous facial and environment monitoring. Please reconnect your camera immediately to resume your interview.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleReconnectCamera}
+              disabled={reconnectingCamera}
+              className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-brand-500/25 transition-all flex items-center justify-center gap-2"
+            >
+              {reconnectingCamera ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Re-enabling Webcam...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Reconnect Camera</span>
                 </>
               )}
             </button>

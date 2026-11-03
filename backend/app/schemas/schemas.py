@@ -318,9 +318,50 @@ class InterviewProctoringEventOut(BaseModel):
     is_security_violation: bool
     description: str
     timestamp_offset_seconds: float
+    confidence_score: Optional[float] = 1.0
+    model_name: Optional[str] = "system"
+    evidence_image_path: Optional[str] = None
+    review_status: Optional[str] = "unreviewed"
+    hr_notes: Optional[str] = ""
+    reviewed_at: Optional[datetime] = None
+    reviewer_id: Optional[str] = None
+    reviewer_name: Optional[str] = None
     metadata_json: Dict[str, Any] = {}
     occurred_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+class AIVideoAnalysisOut(BaseModel):
+    id: str
+    session_id: str
+    recording_id: Optional[str] = None
+    status: str
+    total_frames_sampled: int
+    video_duration_seconds: float
+    processed_duration_seconds: float
+    coverage_percentage: float
+    events_detected_count: int
+    high_priority_count: int
+    technical_events_count: int
+    overall_integrity_status: str
+    model_version: str
+    error_message: Optional[str] = None
+    analysis_summary_json: Dict[str, Any] = {}
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class CameraVerificationResponse(BaseModel):
+    valid: bool
+    has_face: bool
+    is_black: bool
+    is_frozen: bool
+    brightness: float
+    confidence: float
+    error: Optional[str] = None
+
+class InterviewProctoringEventReviewSubmit(BaseModel):
+    review_status: str  # genuine_violation, false_positive, normal_behavior, technical_issue, investigating
+    hr_notes: Optional[str] = ""
 
 class InterviewRecordingOut(BaseModel):
     id: str
@@ -358,6 +399,7 @@ class InterviewProctoringReviewOut(BaseModel):
     recordings: List[InterviewRecordingOut] = []
     events: List[InterviewProctoringEventOut] = []
     violations: List[InterviewViolationOut] = []
+    ai_video_analysis: Optional[AIVideoAnalysisOut] = None
     summary: Dict[str, Any] = {}
 
 class InterviewProctoringVerdictSubmit(BaseModel):

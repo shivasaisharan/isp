@@ -3,7 +3,9 @@ import {
   Play, Pause, Volume2, VolumeX, Maximize, RotateCcw,
   Download, ShieldAlert, ShieldCheck, AlertTriangle, Monitor,
   Camera, Mic, Video, Clock, CheckCircle2, XCircle, FileVideo,
-  ChevronRight, RefreshCw, Sparkles, UserCheck, AlertOctagon
+  ChevronRight, RefreshCw, Sparkles, UserCheck, AlertOctagon,
+  Smartphone, Users, UserX, EyeOff, Rewind, FastForward,
+  Image as ImageIcon, HelpCircle, Check, Tag
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -24,10 +26,23 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [selectedRecordingIndex, setSelectedRecordingIndex] = useState(0);
 
-  // Filter for events
-  const [eventFilter, setEventFilter] = useState('all'); // 'all', 'violations', 'disconnections'
+  // AI Video Analysis State
+  const [analyzingVideo, setAnalyzingVideo] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState(null);
 
-  // HR Verdict Assessment Form
+  // Filter for events
+  const [eventFilter, setEventFilter] = useState('all'); // 'all', 'violations', 'ai_detections', 'disconnections'
+
+  // Evidence Modal
+  const [selectedEvidenceEvent, setSelectedEvidenceEvent] = useState(null);
+
+  // Per-Event Classification State
+  const [reviewingEventId, setReviewingEventId] = useState(null);
+  const [eventReviewStatus, setEventReviewStatus] = useState('genuine_violation');
+  const [eventReviewNotes, setEventReviewNotes] = useState('');
+  const [savingEventReview, setSavingEventReview] = useState(false);
+
+  // Overall HR Verdict Assessment Form
   const [verdict, setVerdict] = useState('cleared');
   const [reviewerNotes, setReviewerNotes] = useState('');
   const [submittingVerdict, setSubmittingVerdict] = useState(false);
@@ -44,6 +59,9 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
       }
       if (res.data.reviewer_notes) {
         setReviewerNotes(res.data.reviewer_notes);
+      }
+      if (res.data.ai_video_analysis) {
+        setAnalysisStatus(res.data.ai_video_analysis);
       }
     } catch (err) {
       console.error("Failed to load proctoring review:", err);
@@ -97,6 +115,13 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
     }
   };
 
+  const jumpSeconds = (delta) => {
+    if (!videoRef.current) return;
+    const nextTime = Math.max(0, Math.min(duration || 10000, videoRef.current.currentTime + delta));
+    videoRef.current.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  };
+
   const changeSpeed = (speed) => {
     setPlaybackSpeed(speed);
     if (videoRef.current) {
@@ -137,7 +162,48 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Submit HR Proctoring Verdict
+  // Trigger AI Video Analysis Pipeline
+  const handleTriggerAnalysis = async () => {
+    setAnalyzingVideo(true);
+    try {
+      const res = await api.post(`/interviews/${sessionId}/ai-video-analysis`);
+      setAnalysisStatus(res.data);
+      await fetchReview();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to start AI video analysis.');
+    } finally {
+      setAnalyzingVideo(false);
+    }
+  };
+
+  // Submit Per-Event Classification
+  const handleSaveEventReview = async (eventId) => {
+    setSavingEventReview(true);
+    try {
+      const res = await api.post(`/interviews/${sessionId}/proctoring-events/${eventId}/review`, {
+        review_status: eventReviewStatus,
+        hr_notes: eventReviewNotes
+      });
+      // Update local events list
+      setReviewData(prev => ({
+        ...prev,
+        events: prev.events.map(ev => ev.id === eventId ? {
+          ...ev,
+          review_status: res.data.review_status,
+          hr_notes: res.data.hr_notes,
+          reviewed_at: res.data.reviewed_at
+        } : ev)
+      }));
+      setReviewingEventId(null);
+      setEventReviewNotes('');
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to save event review.');
+    } finally {
+      setSavingEventReview(false);
+    }
+  };
+
+  // Submit Overall HR Proctoring Verdict
   const handleVerdictSubmit = async (e) => {
     e.preventDefault();
     setSubmittingVerdict(true);
@@ -187,30 +253,58 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
   }
 
   const events = reviewData.events || [];
-  const violations = reviewData.violations || [];
   const consent = reviewData.consent;
-  const recordings = reviewData.recordings || [];
+  const aiAnalysis = reviewData.ai_video_analysis || analysisStatus;
 
   // Filtered timeline events
   const filteredEvents = events.filter(ev => {
-    if (eventFilter === 'violations') return ev.is_security_violation;
+    if (eventFilter === 'violations') return ev.is_security_violation || ev.severity === 'critical';
+    if (eventFilter === 'ai_detections') {
+      return ['multiple_persons_detected', 'cell_phone_detected', 'candidate_absent', 'looking_down_frequently', 'camera_obstructed'].includes(ev.event_type);
+    }
     if (eventFilter === 'disconnections') {
       return ev.event_type.includes('disconnect') || ev.event_type.includes('stopped') || ev.event_type.includes('exit');
     }
     return true;
   });
 
+  const highPriorityCount = events.filter(e => e.severity === 'critical' || e.severity === 'high').length;
+  const reviewedCount = events.filter(e => e.review_status && e.review_status !== 'unreviewed').length;
+  const unreviewedCount = events.length - reviewedCount;
+  const disconnectionCount = events.filter(e => e.event_type.includes('disconnect') || e.event_type.includes('stopped')).length;
+
+  const getEventIcon = (eventType) => {
+    switch (eventType) {
+      case 'cell_phone_detected':
+        return <Smartphone className="w-4 h-4 text-rose-400" />;
+      case 'multiple_persons_detected':
+        return <Users className="w-4 h-4 text-rose-400" />;
+      case 'candidate_absent':
+        return <UserX className="w-4 h-4 text-amber-400" />;
+      case 'looking_down_frequently':
+        return <EyeOff className="w-4 h-4 text-amber-400" />;
+      case 'camera_obstructed':
+      case 'webcam_disconnected':
+        return <Camera className="w-4 h-4 text-rose-400" />;
+      case 'screen_share_stopped':
+      case 'fullscreen_exit':
+        return <Monitor className="w-4 h-4 text-amber-400" />;
+      default:
+        return <ShieldAlert className="w-4 h-4 text-indigo-400" />;
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* =====================================================================
-          HEADER & CANDIDATE SESSION METRICS
+          1. AI PROCTORING & INTEGRITY REVIEW DASHBOARD HEADER
       ====================================================================== */}
       <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/40 border border-slate-800 shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
-                AI Proctoring & Video Inspection
+              <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20 flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> AI Proctoring & Video Inspection
               </span>
               <span className="text-xs text-slate-500 font-mono">Session: {sessionId.slice(0, 8)}...</span>
             </div>
@@ -222,8 +316,8 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
             </p>
           </div>
 
-          {/* Verdict Status Badge */}
-          <div className="flex items-center gap-2">
+          {/* AI Integrity Status + Re-Run Action Button */}
+          <div className="flex flex-wrap items-center gap-2">
             <div className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 ${
               reviewData.proctoring_verdict === 'cleared'
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
@@ -244,11 +338,52 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
                 {reviewData.proctoring_verdict ? reviewData.proctoring_verdict.replace('_', ' ') : 'Pending Review'}
               </span>
             </div>
+
+            <button
+              type="button"
+              onClick={handleTriggerAnalysis}
+              disabled={analyzingVideo}
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
+            >
+              {analyzingVideo ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Processing YOLO AI...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{aiAnalysis ? 'Re-run AI Analysis' : 'Run AI Video Analysis'}</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
 
-        {/* 4 Summary Badges */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+        {/* AI Analysis Status Banner */}
+        {aiAnalysis && (
+          <div className="p-3 rounded-2xl bg-slate-900/90 border border-indigo-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${
+                aiAnalysis.integrity_status === 'no_significant_indicators' ? 'bg-emerald-400' :
+                aiAnalysis.integrity_status === 'suspicious_activity' ? 'bg-amber-400' : 'bg-rose-400'
+              }`} />
+              <span className="font-semibold text-slate-200">
+                AI Vision Status: <span className="capitalize text-indigo-300 font-bold">{aiAnalysis.integrity_status?.replace(/_/g, ' ')}</span>
+              </span>
+              <span className="text-slate-500 text-[11px]">
+                ({aiAnalysis.analyzed_frames_count} frames sampled via {aiAnalysis.detection_model_name})
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-400 flex items-center gap-3">
+              <span>Overall Integrity Score: <b className="text-emerald-400">{aiAnalysis.overall_integrity_score}%</b></span>
+              <span>Total Detections: <b className="text-amber-400">{aiAnalysis.detected_events_count}</b></span>
+            </div>
+          </div>
+        )}
+
+        {/* 5 Summary Metric Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
           <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-center">
             <span className="text-[10px] text-slate-500 uppercase font-bold block">Recorded Video</span>
             <span className="text-sm font-extrabold text-white">
@@ -257,30 +392,37 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-center">
-            <span className="text-[10px] text-slate-500 uppercase font-bold block">Security Strikes</span>
-            <span className={`text-sm font-extrabold ${reviewData.total_violations > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-              {reviewData.total_violations} / 3 Logged
-            </span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-center">
-            <span className="text-[10px] text-slate-500 uppercase font-bold block">Disconnections</span>
-            <span className="text-sm font-extrabold text-slate-200">
-              {reviewData.summary?.total_disconnections || 0}
-            </span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-center">
-            <span className="text-[10px] text-slate-500 uppercase font-bold block">Proctoring Events</span>
+            <span className="text-[10px] text-slate-500 uppercase font-bold block">Total Events</span>
             <span className="text-sm font-extrabold text-indigo-400">
-              {events.length} Audited
+              {events.length}
+            </span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-center">
+            <span className="text-[10px] text-slate-500 uppercase font-bold block">High Priority</span>
+            <span className={`text-sm font-extrabold ${highPriorityCount > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+              {highPriorityCount}
+            </span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-center">
+            <span className="text-[10px] text-slate-500 uppercase font-bold block">Interruptions</span>
+            <span className="text-sm font-extrabold text-amber-400">
+              {disconnectionCount}
+            </span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-center">
+            <span className="text-[10px] text-slate-500 uppercase font-bold block">HR Classifications</span>
+            <span className="text-sm font-extrabold text-slate-200">
+              {reviewedCount} / {events.length}
             </span>
           </div>
         </div>
       </div>
 
       {/* =====================================================================
-          HARDWARE PERMISSIONS & CONSENT VERIFICATION BADGES
+          2. PRE-FLIGHT HARDWARE VERIFICATION BADGES
       ====================================================================== */}
       {consent && (
         <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -292,7 +434,7 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
               consent.webcam_granted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
             }`}>
               <Camera className="w-3.5 h-3.5" />
-              <span>Camera {consent.webcam_granted ? 'Verified' : 'Missing'}</span>
+              <span>Camera {consent.webcam_granted ? 'Verified (Face Confirmed)' : 'Missing'}</span>
             </span>
 
             <span className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 border ${
@@ -306,24 +448,24 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
               consent.screen_share_granted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
             }`}>
               <Monitor className="w-3.5 h-3.5" />
-              <span>Display Share {consent.screen_share_granted ? 'Verified' : 'Missing'}</span>
+              <span>Entire Screen {consent.screen_share_granted ? 'Verified' : 'Missing'}</span>
             </span>
 
             <span className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 border ${
               consent.recording_consent_agreed ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
             }`}>
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Recording Agreement Signed</span>
+              <span>Proctoring Consent Signed</span>
             </span>
           </div>
         </div>
       )}
 
       {/* =====================================================================
-          VIDEO PLAYER & INTERACTIVE PROCTORING TIMELINE GRID
+          3. FULL RECORDING PLAYER & INTERACTIVE PROCTORING TIMELINE GRID
       ====================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Custom Video Player (7 Cols) */}
+        {/* Left Column: Full Original Recording Player (7 Cols) */}
         <div className="lg:col-span-7 space-y-3">
           <div
             ref={containerRef}
@@ -371,16 +513,35 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
 
                   {/* Playback Controls Row */}
                   <div className="flex items-center justify-between text-xs text-slate-300">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={togglePlay}
                         className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white"
+                        title={isPlaying ? 'Pause' : 'Play'}
                       >
                         {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
                       </button>
 
-                      <div className="flex items-center gap-2">
+                      {/* -10s and +10s Quick Seek Buttons */}
+                      <button
+                        type="button"
+                        onClick={() => jumpSeconds(-10)}
+                        className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+                        title="Seek backward 10s"
+                      >
+                        <Rewind className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => jumpSeconds(10)}
+                        className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+                        title="Seek forward 10s"
+                      >
+                        <FastForward className="w-3.5 h-3.5" />
+                      </button>
+
+                      <div className="flex items-center gap-1.5 ml-1">
                         <button
                           type="button"
                           onClick={toggleMute}
@@ -395,23 +556,23 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
                           step={0.05}
                           value={isMuted ? 0 : volume}
                           onChange={handleVolumeChange}
-                          className="w-16 h-1 bg-slate-700 rounded appearance-none accent-indigo-400"
+                          className="w-14 h-1 bg-slate-700 rounded appearance-none accent-indigo-400"
                         />
                       </div>
 
-                      <span className="font-mono text-[11px] text-slate-400">
+                      <span className="font-mono text-[11px] text-slate-400 ml-1">
                         {formatSeconds(currentTime)} / {formatSeconds(duration)}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {/* Speed Pills */}
-                      {[1, 1.25, 1.5, 2].map((s) => (
+                    <div className="flex items-center gap-1.5">
+                      {/* Playback Speeds */}
+                      {[0.5, 1, 1.25, 1.5, 2].map((s) => (
                         <button
                           key={s}
                           type="button"
                           onClick={() => changeSpeed(s)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                             playbackSpeed === s
                               ? 'bg-brand-600 text-white'
                               : 'bg-slate-800 text-slate-400 hover:text-white'
@@ -450,7 +611,7 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
             )}
           </div>
 
-          {/* Recording Media File Details */}
+          {/* Recording Media File Details & Review Window Helper */}
           {activeRecording && (
             <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs text-slate-400">
               <div className="flex items-center gap-2">
@@ -459,14 +620,14 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
                 <span className="text-slate-700">•</span>
                 <span>Size: <b className="text-slate-200">{(activeRecording.file_size_bytes / (1024 * 1024)).toFixed(2)} MB</b></span>
               </div>
-              <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Ready for Playback
+              <span className="text-[11px] text-indigo-400 font-medium">
+                Active Seeking: <b>{formatSeconds(currentTime)}</b> (±10s Window)
               </span>
             </div>
           )}
         </div>
 
-        {/* Right Column: Interactive Proctoring Timeline (5 Cols) */}
+        {/* Right Column: Interactive Proctoring Timeline with Evidence Previews (5 Cols) */}
         <div className="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-3xl p-5 flex flex-col justify-between space-y-4">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -480,14 +641,15 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
             </div>
 
             <p className="text-[11px] text-slate-400">
-              Click any timestamp to <b>instantly jump the video</b> to that exact second of the candidate's interview.
+              Click any event to <b>seek video</b>. Click image snapshots to inspect <b>AI bounding boxes</b>.
             </p>
 
             {/* Filter Pills */}
-            <div className="flex items-center gap-1.5 pt-1">
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
               {[
                 { id: 'all', label: 'All Events' },
-                { id: 'violations', label: 'Security Strikes' },
+                { id: 'ai_detections', label: 'AI Detections' },
+                { id: 'violations', label: 'Strikes / Violations' },
                 { id: 'disconnections', label: 'Disconnections' }
               ].map(tab => (
                 <button
@@ -507,9 +669,9 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
           </div>
 
           {/* Timeline Scroll Area */}
-          <div className="max-h-[360px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+          <div className="max-h-[460px] overflow-y-auto space-y-2.5 pr-1 custom-scrollbar">
             {filteredEvents.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-500">
+              <div className="py-12 text-center text-xs text-slate-500">
                 No events match the selected filter.
               </div>
             ) : (
@@ -528,20 +690,69 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${
-                            ev.severity === 'critical' ? 'bg-rose-500' :
-                            ev.severity === 'high' ? 'bg-rose-400' :
-                            ev.severity === 'medium' ? 'bg-amber-400' : 'bg-emerald-400'
-                          }`} />
+                      <div className="space-y-1 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {getEventIcon(ev.event_type)}
                           <span className="font-bold text-slate-200 capitalize text-[11px]">
                             {ev.event_type.replace(/_/g, ' ')}
                           </span>
+
+                          {/* Confidence Score Pill */}
+                          {ev.confidence_score && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                              {(ev.confidence_score * 100).toFixed(0)}% conf
+                            </span>
+                          )}
+
+                          {/* HR Review Status Tag */}
+                          {ev.review_status && ev.review_status !== 'unreviewed' ? (
+                            <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 capitalize">
+                              {ev.review_status.replace(/_/g, ' ')}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                              Unreviewed
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[11px] text-slate-400 leading-relaxed pl-3.5">
+
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
                           {ev.description}
                         </p>
+
+                        {/* Evidence Image Thumbnail */}
+                        {ev.evidence_image_path && (
+                          <div className="pt-1 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedEvidenceEvent(ev);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-500/30 text-[10px] text-indigo-300 font-semibold"
+                            >
+                              <ImageIcon className="w-3 h-3" />
+                              <span>View Annotated AI Snapshot</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Event Review Action Link */}
+                        <div className="pt-1 flex items-center gap-3 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReviewingEventId(ev.id);
+                              setEventReviewStatus(ev.review_status || 'genuine_violation');
+                              setEventReviewNotes(ev.hr_notes || '');
+                            }}
+                            className="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1"
+                          >
+                            <Tag className="w-3 h-3" />
+                            <span>{ev.review_status && ev.review_status !== 'unreviewed' ? 'Edit Event Classification' : 'Classify Event'}</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Clickable Timestamp Seek Button */}
@@ -566,7 +777,157 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
       </div>
 
       {/* =====================================================================
-          HUMAN HR PROCTORING VERDICT & ASSESSMENT DECISION FORM
+          4. PER-EVENT CLASSIFICATION MODAL
+      ====================================================================== */}
+      {reviewingEventId && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-indigo-400" />
+                <h4 className="text-sm font-bold text-white">Classify Proctoring Event</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviewingEventId(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-300 block">Assessment Verdict</label>
+              <div className="space-y-1.5">
+                {[
+                  { id: 'genuine_violation', label: 'Genuine Violation', desc: 'Confirmed breach of examination integrity' },
+                  { id: 'false_positive', label: 'False Positive', desc: 'AI falsely detected or misclassified normal object' },
+                  { id: 'normal_behavior', label: 'Normal Candidate Behavior', desc: 'Candidate was thinking, adjusting chair, etc.' },
+                  { id: 'technical_issue', label: 'Technical Issue', desc: 'Hardware or network disconnection resolved' },
+                  { id: 'investigating', label: 'Under Investigation', desc: 'Requires further review with senior recruiter' }
+                ].map(opt => (
+                  <label
+                    key={opt.id}
+                    className={`p-2.5 rounded-xl border block cursor-pointer transition text-xs ${
+                      eventReviewStatus === opt.id
+                        ? 'bg-indigo-600/15 border-indigo-500 text-indigo-200'
+                        : 'bg-slate-800/40 border-slate-700/60 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="event_review_status"
+                          value={opt.id}
+                          checked={eventReviewStatus === opt.id}
+                          onChange={() => setEventReviewStatus(opt.id)}
+                          className="accent-indigo-500"
+                        />
+                        <span className="font-bold text-xs text-white">{opt.label}</span>
+                      </div>
+                      {eventReviewStatus === opt.id && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                    </div>
+                    <p className="text-[10px] text-slate-400 pl-5 mt-0.5">{opt.desc}</p>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 block">HR Recruiter Notes</label>
+              <textarea
+                rows={2}
+                value={eventReviewNotes}
+                onChange={(e) => setEventReviewNotes(e.target.value)}
+                placeholder="Optional explanation for audit records..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setReviewingEventId(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-xs text-slate-300 hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSaveEventReview(reviewingEventId)}
+                disabled={savingEventReview}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1.5"
+              >
+                {savingEventReview ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                <span>Save Classification</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          5. EVIDENCE SNAPSHOT MODAL (AI BOUNDING BOX VIEW)
+      ====================================================================== */}
+      {selectedEvidenceEvent && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="max-w-2xl w-full bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-5 h-5 text-indigo-400" />
+                <h4 className="text-sm font-bold text-white">
+                  Annotated AI Evidence Frame ({formatSeconds(selectedEvidenceEvent.timestamp_offset_seconds)})
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedEvidenceEvent(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="relative aspect-video rounded-2xl overflow-hidden bg-black border border-slate-800 flex items-center justify-center">
+              <img
+                src={`/api/v1/interviews/${sessionId}/evidence/${selectedEvidenceEvent.evidence_image_path}`}
+                alt="AI Evidence Frame"
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  e.target.parentNode.innerHTML = '<div class="p-8 text-center text-xs text-slate-400">Evidence frame snapshot loading or unavailable.</div>';
+                }}
+              />
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-white capitalize">{selectedEvidenceEvent.event_type.replace(/_/g, ' ')}</span>
+                <span className="font-mono text-indigo-400">Confidence: {(selectedEvidenceEvent.confidence_score * 100).toFixed(1)}%</span>
+              </div>
+              <p className="text-slate-400">{selectedEvidenceEvent.description}</p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  seekToTime(selectedEvidenceEvent.timestamp_offset_seconds);
+                  setSelectedEvidenceEvent(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1.5"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>Jump Video to This Moment</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          6. HUMAN HR PROCTORING VERDICT & OVERALL ASSESSMENT DECISION FORM
       ====================================================================== */}
       <div className="p-6 sm:p-7 rounded-3xl bg-slate-950 border border-slate-800 shadow-xl space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -586,9 +947,9 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
         <form onSubmit={handleVerdictSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { id: 'cleared', label: 'Cleared', desc: 'No suspicious activity; candidate complied with proctoring.', color: 'emerald' },
-              { id: 'suspicious', label: 'Suspicious', desc: 'Occasional interruptions observed; flagged for review.', color: 'amber' },
-              { id: 'flagged_violation', label: 'Flagged Violation', desc: 'Severe violation of interview integrity.', color: 'rose' }
+              { id: 'cleared', label: 'Cleared', desc: 'No suspicious activity; candidate fully complied with proctoring.', color: 'emerald' },
+              { id: 'suspicious', label: 'Suspicious Activity', desc: 'Occasional interruptions observed; human review required.', color: 'amber' },
+              { id: 'flagged_violation', label: 'Flagged Violation', desc: 'Severe violation of examination integrity.', color: 'rose' }
             ].map(v => (
               <label
                 key={v.id}
@@ -667,4 +1028,3 @@ export default function HrProctoringReviewPlayer({ sessionId, candidateName }) {
     </div>
   );
 }
-

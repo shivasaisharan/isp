@@ -3,7 +3,7 @@ import uuid
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Request, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Request, BackgroundTasks, status
 from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -12,16 +12,19 @@ from app.models.models import (
     InterviewSession, InterviewQuestion, InterviewAnswer, InterviewReport,
     InterviewViolation, Application, ApplicationStatusHistory, Job, User,
     InterviewRecording, InterviewRecordingChunk, InterviewProctoringEvent,
-    InterviewPermissionConsent, InterviewSessionMetadata
+    InterviewPermissionConsent, InterviewSessionMetadata,
+    AIVideoAnalysis, CameraVerificationLog
 )
 from app.schemas.schemas import (
     InterviewStartRequest, InterviewSessionOut, InterviewAnswerSubmit, InterviewQuestionOut,
     InterviewViolationCreate, InterviewViolationOut, InterviewSecurityStatus,
     InterviewConsentSubmit, InterviewConsentOut, InterviewProctoringEventCreate,
     InterviewProctoringEventOut, InterviewRecordingOut, InterviewProctoringReviewOut,
-    InterviewProctoringVerdictSubmit
+    InterviewProctoringVerdictSubmit, AIVideoAnalysisOut, CameraVerificationResponse,
+    InterviewProctoringEventReviewSubmit
 )
 from app.services.supabase_service import SupabaseStorageService
+from app.services.proctoring_ai_service import verify_camera_frame_data, analyze_interview_recording_video
 from app.services.ai_service import (
     generate_interview_questions, evaluate_single_answer, generate_final_interview_report
 )
@@ -971,15 +974,28 @@ async def upload_recording_chunk(
     }
 
 
+def run_background_video_analysis(session_id: str):
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        analyze_interview_recording_video(session_id=session_id, db=db)
+    except Exception as e:
+        print(f"[Async Video Analysis Error] Session {session_id}: {e}")
+    finally:
+        db.close()
+
+
 @router.post("/{session_id}/recordings/finalize", response_model=InterviewRecordingOut)
 def finalize_recording(
     session_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Finalizes the recorded video session, validates full file integrity,
-    and marks status as 'ready' for HR proctoring playback.
+    marks status as 'ready' for HR proctoring playback, and triggers
+    asynchronous chronological AI video analysis.
     """
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
@@ -1016,6 +1032,9 @@ def finalize_recording(
 
     db.commit()
     db.refresh(recording)
+
+    # Trigger background AI Video Analysis pipeline
+    background_tasks.add_task(run_background_video_analysis, session.id)
 
     out = InterviewRecordingOut.model_validate(recording)
     out.playback_url = f"/api/v1/interviews/{session.id}/recordings/{recording.id}/stream"
@@ -1159,6 +1178,17 @@ def get_interview_proctoring_review(
         if reviewer:
             reviewer_name = reviewer.full_name
 
+    ai_analysis = db.query(AIVideoAnalysis).filter(AIVideoAnalysis.session_id == session.id).first()
+
+    events_out = []
+    for e in events:
+        e_out = InterviewProctoringEventOut.model_validate(e)
+        if e.reviewer_id:
+            rev_user = db.query(User).filter(User.id == e.reviewer_id).first()
+            if rev_user:
+                e_out.reviewer_name = rev_user.full_name
+        events_out.append(e_out)
+
     return InterviewProctoringReviewOut(
         session_id=session.id,
         candidate_id=session.candidate_id,
@@ -1178,16 +1208,177 @@ def get_interview_proctoring_review(
         reviewer_name=reviewer_name,
         consent=InterviewConsentOut.model_validate(consent) if consent else None,
         recordings=recordings_out,
-        events=[InterviewProctoringEventOut.model_validate(e) for e in events],
+        events=events_out,
         violations=[InterviewViolationOut.model_validate(v) for v in violations],
+        ai_video_analysis=AIVideoAnalysisOut.model_validate(ai_analysis) if ai_analysis else None,
         summary={
             "total_disconnections": meta.total_disconnections if meta else 0,
             "total_fullscreen_exits": meta.total_fullscreen_exits if meta else 0,
             "total_events": len(events),
             "recording_count": len(recordings),
-            "video_duration_seconds": meta.total_recording_duration_seconds if meta else 0.0
+            "video_duration_seconds": meta.total_recording_duration_seconds if meta else 0.0,
+            "analysis_status": ai_analysis.status if ai_analysis else "pending",
+            "integrity_status": ai_analysis.overall_integrity_status if ai_analysis else "pending_analysis"
         }
     )
+
+
+@router.post("/{session_id}/verify-camera-frame", response_model=CameraVerificationResponse)
+async def verify_camera_frame(
+    session_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Candidate Pre-flight & Live Camera Verification:
+    Strictly verifies that camera stream is genuinely transmitting video frames.
+    Detects black screen, heavy obstruction, and human face presence using YOLO/Computer Vision.
+    """
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview session not found")
+
+    image_bytes = await file.read()
+    metrics = verify_camera_frame_data(image_bytes)
+
+    # Persist verification audit log
+    log = CameraVerificationLog(
+        session_id=session.id,
+        candidate_id=session.candidate_id,
+        status="passed" if metrics["valid"] else "failed",
+        has_face_detected=metrics["has_face"],
+        is_black_screen=metrics["is_black"],
+        is_frozen=metrics["is_frozen"],
+        average_brightness=metrics["brightness"],
+        fps=30.0,
+        error_message=metrics["error"]
+    )
+    db.add(log)
+    db.commit()
+
+    return CameraVerificationResponse(**metrics)
+
+
+@router.post("/{session_id}/ai-video-analysis", response_model=AIVideoAnalysisOut)
+def trigger_ai_video_analysis(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    async_mode: bool = True,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Chronological Second-by-Second AI Video Malpractice Analysis:
+    Inspects full recording with YOLOv8 for cell phones, multiple persons, candidate absence,
+    camera obstruction, and head/posture anomalies.
+    """
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    analysis = db.query(AIVideoAnalysis).filter(AIVideoAnalysis.session_id == session.id).first()
+    recording = db.query(InterviewRecording).filter(InterviewRecording.session_id == session.id).first()
+
+    if not analysis:
+        analysis = AIVideoAnalysis(
+            session_id=session.id,
+            recording_id=recording.id if recording else None,
+            status="processing",
+            overall_integrity_status="analysis_in_progress",
+            started_at=datetime.now(timezone.utc)
+        )
+        db.add(analysis)
+        db.commit()
+        db.refresh(analysis)
+    else:
+        analysis.status = "processing"
+        analysis.overall_integrity_status = "analysis_in_progress"
+        analysis.started_at = datetime.now(timezone.utc)
+        analysis.error_message = None
+        db.commit()
+        db.refresh(analysis)
+
+    if async_mode:
+        background_tasks.add_task(run_background_video_analysis, session.id)
+        return analysis
+    else:
+        completed_analysis = analyze_interview_recording_video(session.id, db)
+        return completed_analysis
+
+
+@router.get("/{session_id}/ai-video-analysis", response_model=AIVideoAnalysisOut)
+def get_ai_video_analysis(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Returns the latest AI Video Analysis coverage report and integrity assessment."""
+    analysis = db.query(AIVideoAnalysis).filter(AIVideoAnalysis.session_id == session_id).first()
+    if not analysis:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI Video Analysis not yet generated for this session")
+    return analysis
+
+
+@router.post("/{session_id}/proctoring-events/{event_id}/review", response_model=InterviewProctoringEventOut)
+def review_proctoring_event(
+    session_id: str,
+    event_id: str,
+    review_in: InterviewProctoringEventReviewSubmit,
+    hr_user: User = Depends(require_hr),
+    db: Session = Depends(get_db)
+):
+    """
+    HR Recruiter Individual Event Classification:
+    Allows classifying AI detections as 'genuine_violation', 'false_positive', 'normal_behavior', 'technical_issue', or 'investigating'.
+    """
+    event = db.query(InterviewProctoringEvent).filter(
+        InterviewProctoringEvent.id == event_id,
+        InterviewProctoringEvent.session_id == session_id
+    ).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proctoring event not found")
+
+    event.review_status = review_in.review_status
+    event.hr_notes = review_in.hr_notes or ""
+    event.reviewed_at = datetime.now(timezone.utc)
+    event.reviewer_id = hr_user.id
+
+    try:
+        record_audit_log(
+            db=db,
+            actor_id=hr_user.id,
+            action="HR_PROCTORING_EVENT_CLASSIFIED",
+            target_type="interview_proctoring_event",
+            target_id=event.id,
+            details={
+                "session_id": session_id,
+                "event_type": event.event_type,
+                "review_status": review_in.review_status,
+                "hr_notes": review_in.hr_notes
+            }
+        )
+    except Exception as e:
+        print(f"[Audit Warning]: {e}")
+
+    db.commit()
+    db.refresh(event)
+
+    out = InterviewProctoringEventOut.model_validate(event)
+    out.reviewer_name = hr_user.full_name
+    return out
+
+
+@router.get("/{session_id}/evidence/{filename}")
+def get_proctoring_evidence_image(
+    session_id: str,
+    filename: str,
+    db: Session = Depends(get_db)
+):
+    """Serves high-resolution annotated evidence crops for detected proctoring anomalies."""
+    evidence_path = Path(settings.UPLOAD_DIR) / "recordings" / session_id / "evidence" / filename
+    if not evidence_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence frame file not found")
+    return FileResponse(path=str(evidence_path), media_type="image/jpeg")
 
 
 @router.post("/{session_id}/proctoring-verdict")

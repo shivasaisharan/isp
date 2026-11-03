@@ -142,3 +142,59 @@ def test_interview_proctoring_and_recording_pipeline(client):
     assert review_after.json()["proctoring_verdict"] == "cleared"
     assert "No unauthorized behavior" in review_after.json()["reviewer_notes"]
 
+    # 11. Test Camera Frame Verification (Black screen detection vs valid frame)
+    import cv2
+    import numpy as np
+
+    # A: Black frame
+    black_img = np.zeros((100, 100, 3), dtype=np.uint8)
+    _, black_buf = cv2.imencode(".jpg", black_img)
+    verify_black = client.post(
+        f"/api/v1/interviews/{session_id}/verify-camera-frame",
+        files={"file": ("frame.jpg", io.BytesIO(black_buf.tobytes()), "image/jpeg")},
+        headers=cand_headers
+    )
+    assert verify_black.status_code == 200
+    assert verify_black.json()["valid"] is False
+    assert verify_black.json()["is_black"] is True
+
+    # B: Valid illuminated frame
+    valid_img = np.full((300, 300, 3), 160, dtype=np.uint8)
+    # Add simple facial region contrast so skin/face detector triggers
+    cv2.circle(valid_img, (150, 150), 60, (200, 200, 200), -1)
+    _, valid_buf = cv2.imencode(".jpg", valid_img)
+    verify_valid = client.post(
+        f"/api/v1/interviews/{session_id}/verify-camera-frame",
+        files={"file": ("frame.jpg", io.BytesIO(valid_buf.tobytes()), "image/jpeg")},
+        headers=cand_headers
+    )
+    assert verify_valid.status_code == 200
+    assert verify_valid.json()["valid"] is True
+    assert verify_valid.json()["has_face"] is True
+
+    # 12. Test Chronological AI Video Analysis Trigger
+    ai_analysis_res = client.post(
+        f"/api/v1/interviews/{session_id}/ai-video-analysis?async_mode=false",
+        headers=hr_headers
+    )
+    assert ai_analysis_res.status_code == 200
+    analysis_data = ai_analysis_res.json()
+    assert analysis_data["session_id"] == session_id
+    assert analysis_data["status"] in ["completed", "processing"]
+    assert "model_version" in analysis_data
+
+    # 13. Test HR Individual Event Classification & Notes
+    first_event_id = review_after.json()["events"][0]["id"]
+    event_review_res = client.post(
+        f"/api/v1/interviews/{session_id}/proctoring-events/{first_event_id}/review",
+        json={
+            "review_status": "normal_behavior",
+            "hr_notes": "Verified candidate consent and initial environment setup."
+        },
+        headers=hr_headers
+    )
+    assert event_review_res.status_code == 200
+    assert event_review_res.json()["review_status"] == "normal_behavior"
+    assert event_review_res.json()["hr_notes"] == "Verified candidate consent and initial environment setup."
+
+

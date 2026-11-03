@@ -223,6 +223,7 @@ class InterviewSession(Base):
     proctoring_events = relationship("InterviewProctoringEvent", back_populates="session", cascade="all, delete-orphan", order_by="InterviewProctoringEvent.occurred_at")
     consent = relationship("InterviewPermissionConsent", back_populates="session", uselist=False, cascade="all, delete-orphan")
     metadata_record = relationship("InterviewSessionMetadata", back_populates="session", uselist=False, cascade="all, delete-orphan")
+    ai_video_analysis = relationship("AIVideoAnalysis", back_populates="session", uselist=False, cascade="all, delete-orphan")
 
 
 class InterviewViolation(Base):
@@ -289,8 +290,18 @@ class InterviewProctoringEvent(Base):
     metadata_json = Column(JSON, default=dict, nullable=False)
     occurred_at = Column(DateTime, default=utc_now, nullable=False)
 
+    # Malpractice Review & AI Evidence Details
+    evidence_image_path = Column(Text, nullable=True)
+    confidence_score = Column(Float, default=1.0, nullable=False)
+    model_name = Column(String(50), default="system", nullable=False)
+    review_status = Column(String(30), default="unreviewed", nullable=False)  # unreviewed, genuine_violation, false_positive, normal_behavior, technical_issue, investigating
+    hr_notes = Column(Text, default="", nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewer_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     session = relationship("InterviewSession", back_populates="proctoring_events")
-    candidate = relationship("User")
+    candidate = relationship("User", foreign_keys=[candidate_id])
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
 
 
 class InterviewPermissionConsent(Base):
@@ -329,6 +340,51 @@ class InterviewSessionMetadata(Base):
 
     session = relationship("InterviewSession", back_populates="metadata_record")
     reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+
+class AIVideoAnalysis(Base):
+    __tablename__ = "ai_video_analyses"
+
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    session_id = Column(String(36), ForeignKey("interview_sessions.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    recording_id = Column(String(36), ForeignKey("interview_recordings.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(30), default="pending", nullable=False)  # pending, processing, completed, failed
+    total_frames_sampled = Column(Integer, default=0, nullable=False)
+    video_duration_seconds = Column(Float, default=0.0, nullable=False)
+    processed_duration_seconds = Column(Float, default=0.0, nullable=False)
+    coverage_percentage = Column(Float, default=0.0, nullable=False)
+    events_detected_count = Column(Integer, default=0, nullable=False)
+    high_priority_count = Column(Integer, default=0, nullable=False)
+    technical_events_count = Column(Integer, default=0, nullable=False)
+    overall_integrity_status = Column(String(50), default="pending_analysis", nullable=False)
+    # pending_analysis, analysis_in_progress, no_significant_indicators, suspicious_activity_flagged, technical_issues_detected, human_review_completed
+    model_version = Column(String(50), default="YOLOv8n-Vision-2026.1", nullable=False)
+    error_message = Column(Text, nullable=True)
+    analysis_summary_json = Column(JSON, default=dict, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    session = relationship("InterviewSession", back_populates="ai_video_analysis")
+    recording = relationship("InterviewRecording")
+
+
+class CameraVerificationLog(Base):
+    __tablename__ = "camera_verification_logs"
+
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    session_id = Column(String(36), ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    candidate_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(30), nullable=False)  # passed, failed, retried
+    has_face_detected = Column(Boolean, default=False, nullable=False)
+    is_black_screen = Column(Boolean, default=False, nullable=False)
+    is_frozen = Column(Boolean, default=False, nullable=False)
+    average_brightness = Column(Float, default=0.0, nullable=False)
+    fps = Column(Float, default=0.0, nullable=False)
+    error_message = Column(Text, nullable=True)
+    verified_at = Column(DateTime, default=utc_now, nullable=False)
+
+    session = relationship("InterviewSession")
+    candidate = relationship("User")
 
 
 class InterviewQuestion(Base):
